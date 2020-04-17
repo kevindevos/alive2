@@ -119,7 +119,7 @@ bool State::startBB(const BasicBlock &bb) {
   current_bb = &bb;
 
   domain.reset();
-  bb_ub = expr(true);
+  bb_ub.reset();
 
   if (&f.getFirstBB() == &bb)
     return true;
@@ -214,7 +214,6 @@ expr State::topdown() {
         for (auto &choice : choices) {
           auto ch_exprs = gatherExprs(choice);
           val = val ? expr::mkIf(choice.cond, ch_exprs, *val) : ch_exprs;
-          std::cout << *val << '\n';
         }
         bb_exprs = gatherExprs(*cur) && *val;
       }
@@ -222,6 +221,7 @@ expr State::topdown() {
   }
   auto entry_result = std::get<2>(ite_data[&entry]);
   return entry_result.isValid() ? entry_result : expr(true);
+
 }
 
 expr State::gatherExprs(const JumpChoice &ch) {
@@ -298,7 +298,6 @@ void State::addReturn(const StateValue &val) {
   bb_ub_data[current_bb] = bb_ub();
   backwalk(*current_bb);
   auto ret_ub = topdown();
-  bb_ub_data.clear();
   ite_data.clear();
   std::cout << "====> OLD UB:\n" << domain.UB() << "\n";
   std::cout << "====> NEW UB:\n" << ret_ub << "\n";
