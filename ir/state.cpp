@@ -253,8 +253,11 @@ void State::addJump(const BasicBlock &dst0, expr &&cond) {
   auto &data = predecessor_data[dst][current_bb];
   auto &domain_preds = std::get<0>(data);
   auto &mem = std::get<1>(data);
-  // set jump cond only excluding already existing domain.path
-  std::get<2>(data) = cond;
+  // set standalone cond, or with existing if > 1 jump for same src->tgt pair
+  // for example switch case and default jump to same source and tgt
+  auto &c = std::get<2>(data);
+  c = !c.isValid() ? cond : c || cond; 
+  
   cond &= domain.path;
   mem.add(memory, cond);
   domain_preds.UB.add(domain.UB(), cond);
