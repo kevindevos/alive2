@@ -9,6 +9,10 @@
 #include <cassert>
 #include <stack>
 
+// testing
+#include <smt/solver.h>
+#include <iostream>
+
 using namespace smt;
 using namespace util;
 using namespace std;
@@ -115,6 +119,7 @@ bool State::startBB(const BasicBlock &bb) {
   current_bb = &bb;
 
   domain.reset();
+  bb_ub = expr(true);
 
   if (&f.getFirstBB() == &bb)
     return true;
@@ -124,6 +129,7 @@ bool State::startBB(const BasicBlock &bb) {
     return false;
 
   DisjointExpr<Memory> in_memory;
+  DisjointExpr<expr> UB;
   OrExpr path;
 
   for (auto &[src, data] : I->second) {
@@ -132,11 +138,13 @@ bool State::startBB(const BasicBlock &bb) {
     (void)cond;
     path.add(dom.path);
     expr p = dom.path();
+    UB.add_disj(dom.UB, p);
     in_memory.add_disj(mem, move(p));
     domain.undef_vars.insert(dom.undef_vars.begin(), dom.undef_vars.end());
   }
 
   domain.path = path();
+  domain.UB.add(*UB());
   memory = *in_memory();
 
   return domain;
@@ -206,12 +214,14 @@ expr State::topdown() {
         for (auto &choice : choices) {
           auto ch_exprs = gatherExprs(choice);
           val = val ? expr::mkIf(choice.cond, ch_exprs, *val) : ch_exprs;
+          std::cout << *val << '\n';
         }
         bb_exprs = gatherExprs(*cur) && *val;
       }
     }
   }
-  return std::get<2>(ite_data[&entry]);
+  auto entry_result = std::get<2>(ite_data[&entry]);
+  return entry_result.isValid() ? entry_result : expr(true);
 }
 
 expr State::gatherExprs(const JumpChoice &ch) {
@@ -249,7 +259,7 @@ void State::addJump(const BasicBlock &dst0, expr &&cond) {
   }
 
   // TODO will be integrated into DomainPreds later
-  bb_ub_data[current_bb] = domain.UB();
+  bb_ub_data[current_bb] = bb_ub();
 
   auto &data = predecessor_data[dst][current_bb];
   auto &domain_preds = std::get<0>(data);
@@ -285,10 +295,30 @@ void State::addCondJump(const expr &cond, const BasicBlock &dst_true,
 }
 
 void State::addReturn(const StateValue &val) {
-  bb_ub_data[current_bb] = domain.UB();
+  bb_ub_data[current_bb] = bb_ub();
   backwalk(*current_bb);
-  auto result = topdown();
-  return_domain.add(move(result));
+  auto ret_ub = topdown();
+  bb_ub_data.clear();
+  ite_data.clear();
+  std::cout << "====> OLD UB:\n" << domain.UB() << "\n";
+  std::cout << "====> NEW UB:\n" << ret_ub << "\n";
+  //return_domain.add(move(ret_ub));
+
+  // Testing if original ub != ret_ub is UNSAT
+  Solver s;
+  s.add(ret_ub != domain.UB());
+  auto solver_result = s.check();
+  if (solver_result.isSat()) {
+    std::cout << "MISMATCH new ub does not match old ub\n";
+    std::cout << "Model:\n" << solver_result.getModel() << "\n";
+  } else {
+    std::cout << "MATCH new ub matches old ub\n";
+  }
+
+  // draft code - use the new ub instead of old, only change if not entry
+  // TODO no need to run the algorithm if this is the first BB
+  if (current_bb != &f.getFirstBB())
+    domain.UB = ret_ub;
 
   return_val.add(val, domain.path);
   return_memory.add(memory, domain.path);
@@ -301,18 +331,21 @@ void State::addReturn(const StateValue &val) {
 }
 
 void State::addUB(expr &&ub) {
+  bb_ub.add(ub);
   domain.UB.add(move(ub));
   if (!ub.isConst())
     domain.undef_vars.insert(undef_vars.begin(), undef_vars.end());
 }
 
 void State::addUB(const expr &ub) {
+  bb_ub.add(ub);
   domain.UB.add(ub);
   if (!ub.isConst())
     domain.undef_vars.insert(undef_vars.begin(), undef_vars.end());
 }
 
 void State::addUB(AndExpr &&ubs) {
+  bb_ub.add(ubs);
   domain.UB.add(ubs);
   domain.undef_vars.insert(undef_vars.begin(), undef_vars.end());
 }
