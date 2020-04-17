@@ -164,7 +164,8 @@ void State::backwalk(const BasicBlock &bb) {
     for (auto &[pred, pred_data] : preds) {
       S.emplace(pred, marker);
 
-      if (pred->hasCondJump() || predecessor_data[pred].size() > 1) {
+      if (pred->hasCondJump() || predecessor_data[pred].size() > 1
+          || pred == &entry) {
         auto &cond = std::get<2>(pred_data);
         auto &pred_choices = std::get<3>(ite_data[pred]);
         pred_choices.emplace_back(cond, *pred, *cur, *marker);
