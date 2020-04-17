@@ -43,6 +43,11 @@ public:
   }
   Instr& back() { return *m_instrs.back(); }
 
+  JumpInstr* hasJump() const;
+  bool hasCondJump() const;
+  bool hasBranch() const;
+  bool hasSwitch() const;
+
   bool empty() const { return m_instrs.empty(); }
 
   std::unique_ptr<BasicBlock> dup(const std::string &suffix) const;

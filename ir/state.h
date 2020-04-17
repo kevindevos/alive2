@@ -23,6 +23,7 @@ namespace IR {
 class Value;
 class BasicBlock;
 class Function;
+class DomTree;
 
 class State {
 public:
@@ -66,8 +67,9 @@ private:
   // dst BB -> src BB -> (domain data, memory)
   std::unordered_map<const BasicBlock*,
                      std::unordered_map<const BasicBlock*,
-                                        std::pair<DomainPreds,
-                                                  smt::DisjointExpr<Memory>>>>
+                                        std::tuple<DomainPreds,
+                                                   smt::DisjointExpr<Memory>,
+                                                   smt::expr>>>
     predecessor_data;
   std::unordered_set<const BasicBlock*> seen_bbs;
 
@@ -109,6 +111,29 @@ private:
   };
   std::map<std::string, std::map<FnCallInput, FnCallOutput>> fn_call_data;
 
+
+  struct JumpChoice {
+    const smt::expr cond;
+    const BasicBlock &src;
+    const BasicBlock &tgt;
+    const BasicBlock &end;
+    
+    JumpChoice(const smt::expr cond, const BasicBlock &src, 
+                const BasicBlock &tgt, const BasicBlock &end) 
+                : cond(cond), src(src), tgt(tgt), end(end) {};
+  };
+
+  std::unordered_map<const BasicBlock*, std::tuple<bool, bool, smt::expr,
+                                                   std::vector<JumpChoice>>>
+    ite_data;
+
+  // TODO will be removed later - only needed to store UB of each bb 
+  // non-cumulatively - DomainPreds.UB will have to be expr instead of
+  // DisjointExpr
+  std::unordered_map<const BasicBlock*, smt::expr> bb_ub_data;
+
+  std::unique_ptr<DomTree> dom_tree; // TODO with optional
+
 public:
   State(Function &f, bool source);
 
@@ -122,6 +147,11 @@ public:
   bool isUndef(const smt::expr &e) const;
 
   bool startBB(const BasicBlock &bb);
+  void backwalk(const BasicBlock &bb);
+  smt::expr topdown();
+  smt::expr gatherExprs(const JumpChoice &ch);
+  smt::expr gatherExprs(const BasicBlock &bb);
+
   void addJump(const BasicBlock &dst);
   // boolean cond
   void addJump(smt::expr &&cond, const BasicBlock &dst);
