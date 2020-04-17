@@ -77,7 +77,7 @@ private:
   std::unordered_map<std::string, std::pair<unsigned, bool> > glbvar_bids;
 
   // temp state
-  CurrentDomain domain;
+  CurrentDomain domain; // TODO UB in this domain is the ub before ite changes
   Memory memory;
   std::set<smt::expr> undef_vars;
   std::array<StateValue, 32> tmp_values;
@@ -129,6 +129,10 @@ private:
   // non-cumulatively - DomainPreds.UB will have to be expr instead of
   // DisjointExpr
   std::unordered_map<const BasicBlock*, smt::expr> bb_ub_data;
+
+  // store UB of current bb only // also will be removed later once the 
+  // original implementation is replaced.
+  smt::AndExpr bb_ub;
 
   std::unique_ptr<DomTree> dom_tree; // TODO with optional
 
