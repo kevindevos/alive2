@@ -333,6 +333,7 @@ public:
 
   auto& getTrue() const { return dst_true; }
   auto getFalse() const { return dst_false; }
+  Value* getCond() const { return cond; }
   std::vector<Value*> operands() const override;
   void rauw(const Value &what, Value &with) override;
   void print(std::ostream &os) const override;
