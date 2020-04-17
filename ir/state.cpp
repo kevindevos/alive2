@@ -9,9 +9,6 @@
 #include <cassert>
 #include <stack>
 
-// TODO debug
-#include <iostream>
-
 using namespace smt;
 using namespace util;
 using namespace std;
@@ -206,15 +203,13 @@ expr State::topdown() {
         auto &choices = std::get<3>(cur_data);
         optional<expr> val;
         for (auto &choice : choices) {
-          auto choice_exprs = gatherExprs(choice);
-          val = val ? expr::mkIf(choice.cond, choice_exprs, *val) : choice_exprs;
+          auto ch_exprs = gatherExprs(choice);
+          val = val ? expr::mkIf(choice.cond, ch_exprs, *val) : ch_exprs;
         }
         bb_exprs = gatherExprs(*cur) && *val;
       }
     }
-
   }
-
   return std::get<2>(ite_data[&entry]);
 }
 
@@ -234,7 +229,7 @@ expr State::gatherExprs(const JumpChoice &ch) {
     if (cur != &ch.end)
       cur = &(*cur->hasJump()->targets().begin());
     else
-      break;    
+      break;
   }
   return e;
 }

@@ -110,15 +110,14 @@ private:
   };
   std::map<std::string, std::map<FnCallInput, FnCallOutput>> fn_call_data;
 
-
   struct JumpChoice {
     const smt::expr cond;
     const BasicBlock &src;
     const BasicBlock &tgt;
     const BasicBlock &end;
     
-    JumpChoice(const smt::expr cond, const BasicBlock &src, 
-                const BasicBlock &tgt, const BasicBlock &end) 
+    JumpChoice(const smt::expr cond, const BasicBlock &src,
+                const BasicBlock &tgt, const BasicBlock &end)
                 : cond(cond), src(src), tgt(tgt), end(end) {};
   };
 
