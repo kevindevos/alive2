@@ -208,20 +208,22 @@ expr State::topdown() {
     } else {
       // On second visit, construct smt expressions if we haven't done so yet
       auto &bb_exprs = std::get<2>(cur_data);
-      if (!bb_exprs.isValid()) {
+      if (!bb_exprs) {
         auto &choices = std::get<3>(cur_data);
         optional<expr> val;
         for (auto &choice : choices) {
           auto ch_exprs = gatherExprs(choice);
           val = val ? expr::mkIf(choice.cond, ch_exprs, *val) : ch_exprs;
         }
-        bb_exprs = gatherExprs(*cur) && *val;
+        auto cur_ub = gatherExprs(*cur);
+        bb_exprs = val;
+        bb_exprs = bb_exprs ? (cur_ub ? *bb_exprs && *cur_ub : bb_exprs) 
+                            : cur_ub;
       }
     }
   }
   auto entry_result = std::get<2>(ite_data[&entry]);
-  return entry_result.isValid() ? entry_result : expr(true);
-
+  return entry_result ? *entry_result : expr(true);
 }
 
 expr State::gatherExprs(const JumpChoice &ch) {
@@ -231,11 +233,12 @@ expr State::gatherExprs(const JumpChoice &ch) {
     auto &cur_data = ite_data[cur];
     auto &bb_exprs = std::get<2>(cur_data);
 
-    if (bb_exprs.isValid()) {
-      e = e && bb_exprs;
+    if (bb_exprs) {
+      e = e && *bb_exprs;
       break;
     }
-    e = e && gatherExprs(*cur);
+    auto bb_ub = gatherExprs(*cur);
+    e = bb_ub ? e && *bb_ub : e;
 
     if (cur != &ch.end)
       cur = &(*cur->hasJump()->targets().begin());
@@ -245,7 +248,7 @@ expr State::gatherExprs(const JumpChoice &ch) {
   return e;
 }
 
-expr State::gatherExprs(const BasicBlock &bb) {
+optional<expr> State::gatherExprs(const BasicBlock &bb) {
   return bb_ub_data[&bb];
 }
 
@@ -299,20 +302,20 @@ void State::addReturn(const StateValue &val) {
   backwalk(*current_bb);
   auto ret_ub = topdown();
   ite_data.clear();
-  std::cout << "====> OLD UB:\n" << domain.UB() << "\n";
-  std::cout << "====> NEW UB:\n" << ret_ub << "\n";
+  // std::cout << "====> OLD UB:\n" << domain.UB() << "\n";
+  // std::cout << "====> NEW UB:\n" << ret_ub << "\n";
   //return_domain.add(move(ret_ub));
 
   // Testing if original ub != ret_ub is UNSAT
-  Solver s;
-  s.add(ret_ub != domain.UB());
-  auto solver_result = s.check();
-  if (solver_result.isSat()) {
-    std::cout << "MISMATCH new ub does not match old ub\n";
-    std::cout << "Model:\n" << solver_result.getModel() << "\n";
-  } else {
-    std::cout << "MATCH new ub matches old ub\n";
-  }
+  // Solver s;
+  // s.add(ret_ub != domain.UB());
+  // auto solver_result = s.check();
+  // if (solver_result.isSat()) {
+  //   std::cout << "MISMATCH new ub does not match old ub\n";
+  //   std::cout << "Model:\n" << solver_result.getModel() << "\n";
+  // } else {
+  //   std::cout << "MATCH new ub matches old ub\n";
+  // }
 
   // draft code - use the new ub instead of old, only change if not entry
   // TODO no need to run the algorithm if this is the first BB

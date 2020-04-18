@@ -121,14 +121,15 @@ private:
                 : cond(cond), src(src), tgt(tgt), end(end) {};
   };
 
-  std::unordered_map<const BasicBlock*, std::tuple<bool, bool, smt::expr,
+  std::unordered_map<const BasicBlock*, std::tuple<bool, bool, 
+                                                   std::optional<smt::expr>,
                                                    std::vector<JumpChoice>>>
     ite_data;
 
   // TODO will be removed later - only needed to store UB of each bb 
   // non-cumulatively - DomainPreds.UB will have to be expr instead of
   // DisjointExpr
-  std::unordered_map<const BasicBlock*, smt::expr> bb_ub_data;
+  std::unordered_map<const BasicBlock*, std::optional<smt::expr>> bb_ub_data;
 
   // store UB of current bb only // also will be removed later once the 
   // original implementation is replaced.
@@ -152,7 +153,7 @@ public:
   void backwalk(const BasicBlock &bb);
   smt::expr topdown();
   smt::expr gatherExprs(const JumpChoice &ch);
-  smt::expr gatherExprs(const BasicBlock &bb);
+  std::optional<smt::expr> gatherExprs(const BasicBlock &bb);
 
   void addJump(const BasicBlock &dst);
   // boolean cond
