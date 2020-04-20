@@ -30,7 +30,7 @@ void BasicBlock::addInstr(unique_ptr<Instr> &&i) {
 }
 
 JumpInstr* BasicBlock::hasJump() const {
-  if (auto jump = static_cast<JumpInstr*>(&(*m_instrs.back())))
+  if (auto jump = dynamic_cast<JumpInstr*>(&(*m_instrs.back())))
     return jump;
   return nullptr;
 }
@@ -40,15 +40,11 @@ bool BasicBlock::hasCondJump() const {
 }
 
 bool BasicBlock::hasBranch() const {
-  if (auto br = dynamic_cast<Branch*>(&(*m_instrs.back())))
-    return br->getCond() != nullptr;
-  return false;
+  return dynamic_cast<Branch*>(&(*m_instrs.back()));
 }
 
 bool BasicBlock::hasSwitch() const {
-  if (auto sw = dynamic_cast<Switch*>(&(*m_instrs.back())))
-    return sw->getNumTargets() > 1;
-  return false;
+  return dynamic_cast<Switch*>(&(*m_instrs.back()));
 }
 
 unique_ptr<BasicBlock> BasicBlock::dup(const string &suffix) const {
