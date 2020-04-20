@@ -129,7 +129,6 @@ bool State::startBB(const BasicBlock &bb) {
     return false;
 
   DisjointExpr<Memory> in_memory;
-  DisjointExpr<expr> UB;
   OrExpr path;
 
   for (auto &[src, data] : I->second) {
@@ -138,13 +137,11 @@ bool State::startBB(const BasicBlock &bb) {
     (void)cond;
     path.add(dom.path);
     expr p = dom.path();
-    UB.add_disj(dom.UB, p);
-    in_memory.add_disj(mem, move(p));
+    in_memory.add_disj(mem, dom.path());
     domain.undef_vars.insert(dom.undef_vars.begin(), dom.undef_vars.end());
   }
 
   domain.path = path();
-  domain.UB.add(*UB());
   memory = *in_memory();
 
   return domain;
@@ -183,7 +180,7 @@ void State::backwalk(const BasicBlock &bb) {
   }
 }
 
-expr State::topdown() {
+std::pair<expr, expr> State::topdown() {
   const BasicBlock &entry = f.getFirstBB();
   stack<const BasicBlock*> S;
   S.push(&entry);
@@ -193,6 +190,7 @@ expr State::topdown() {
     S.pop();
     auto &cur_data = ite_data[cur];
     bool &td_visited = std::get<1>(cur_data);
+    auto &path = std::get<4>(cur_data);
     
     // On first visit add all children to the stack after current to guarantee
     // the smt expressions for all children are built before the parent's
@@ -207,23 +205,27 @@ expr State::topdown() {
       td_visited = true;
     } else {
       // On second visit, construct smt expressions if we haven't done so yet
-      auto &bb_exprs = std::get<2>(cur_data);
-      if (!bb_exprs) {
+      auto &ub = std::get<2>(cur_data);
+      if (!ub) {
         auto &choices = std::get<3>(cur_data);
+        path = choices.empty() ? expr(true) : expr(false);
         optional<expr> val;
         for (auto &choice : choices) {
           auto ch_exprs = gatherExprs(choice);
           val = val ? expr::mkIf(choice.cond, ch_exprs, *val) : ch_exprs;
+          path = path || (choice.cond && std::get<4>(ite_data[&choice.tgt]));
         }
         auto cur_ub = gatherExprs(*cur);
-        bb_exprs = val;
-        bb_exprs = bb_exprs ? (cur_ub ? *bb_exprs && *cur_ub : bb_exprs) 
+        ub = val;
+        ub = ub ? (cur_ub ? *ub && *cur_ub : ub) 
                             : cur_ub;
       }
     }
   }
-  auto entry_result = std::get<2>(ite_data[&entry]);
-  return entry_result ? *entry_result : expr(true);
+  auto &entry_data = ite_data[&entry];
+  auto &entry_ub = std::get<2>(entry_data);
+  auto &entry_path = std::get<4>(entry_data);
+  return {entry_ub ? *entry_ub : expr(true), entry_path};
 }
 
 expr State::gatherExprs(const JumpChoice &ch) {
@@ -231,10 +233,10 @@ expr State::gatherExprs(const JumpChoice &ch) {
   auto cur = &ch.tgt;
   while (true) {
     auto &cur_data = ite_data[cur];
-    auto &bb_exprs = std::get<2>(cur_data);
+    auto &ub = std::get<2>(cur_data);
 
-    if (bb_exprs) {
-      e = e && *bb_exprs;
+    if (ub) {
+      e = e && *ub;
       break;
     }
     auto bb_ub = gatherExprs(*cur);
@@ -274,7 +276,6 @@ void State::addJump(const BasicBlock &dst0, expr &&cond) {
   
   cond &= domain.path;
   mem.add(memory, cond);
-  domain_preds.UB.add(domain.UB(), cond);
   domain_preds.path.add(move(cond));
   domain_preds.undef_vars.insert(undef_vars.begin(), undef_vars.end());
   domain_preds.undef_vars.insert(domain.undef_vars.begin(),
@@ -299,28 +300,17 @@ void State::addCondJump(const expr &cond, const BasicBlock &dst_true,
 
 void State::addReturn(const StateValue &val) {
   bb_ub_data[current_bb] = bb_ub();
-  backwalk(*current_bb);
-  auto ret_ub = topdown();
-  ite_data.clear();
-  // std::cout << "====> OLD UB:\n" << domain.UB() << "\n";
-  // std::cout << "====> NEW UB:\n" << ret_ub << "\n";
-  //return_domain.add(move(ret_ub));
-
-  // Testing if original ub != ret_ub is UNSAT
-  // Solver s;
-  // s.add(ret_ub != domain.UB());
-  // auto solver_result = s.check();
-  // if (solver_result.isSat()) {
-  //   std::cout << "MISMATCH new ub does not match old ub\n";
-  //   std::cout << "Model:\n" << solver_result.getModel() << "\n";
-  // } else {
-  //   std::cout << "MATCH new ub matches old ub\n";
-  // }
-
-  // draft code - use the new ub instead of old, only change if not entry
-  // TODO no need to run the algorithm if this is the first BB
-  if (current_bb != &f.getFirstBB())
-    domain.UB = ret_ub;
+ 
+  std::cout << "OLD PATH: " << domain.path << "\n";
+  if (current_bb != &f.getFirstBB()) {
+    backwalk(*current_bb);
+    auto [ub, path] = topdown();
+    domain.UB = move(ub);
+    // overwrite current domain.path for a more optimal one
+    domain.path = move(path);
+    std::cout << "NEW PATH: " << domain.path << "\n";
+    ite_data.clear();
+  }
 
   return_val.add(val, domain.path);
   return_memory.add(memory, domain.path);
