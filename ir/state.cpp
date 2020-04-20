@@ -176,7 +176,7 @@ void State::backwalk(const BasicBlock &bb) {
           || pred == &entry) {
         auto &cond = std::get<2>(pred_data);
         auto &pred_choices = std::get<3>(ite_data[pred]);
-        pred_choices.emplace_back(cond, *pred, *cur, *marker);
+        pred_choices.emplace_back(*cond, *pred, *cur, *marker);
       }
     }
     bw_visited = true;
@@ -270,7 +270,7 @@ void State::addJump(const BasicBlock &dst0, expr &&cond) {
   // set standalone cond, or with existing if > 1 jump for same src->tgt pair
   // for example switch case and default jump to same source and tgt
   auto &c = std::get<2>(data);
-  c = !c.isValid() ? cond : c || cond; 
+  c = c ? *c || cond : cond;
   
   cond &= domain.path;
   mem.add(memory, cond);
