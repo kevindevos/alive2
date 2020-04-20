@@ -69,7 +69,7 @@ private:
                      std::unordered_map<const BasicBlock*,
                                         std::tuple<DomainPreds,
                                                    smt::DisjointExpr<Memory>,
-                                                   smt::expr>>>
+                                                   std::optional<smt::expr>>>>
     predecessor_data;
   std::unordered_set<const BasicBlock*> seen_bbs;
 
