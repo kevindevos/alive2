@@ -122,9 +122,11 @@ private:
                 : cond(cond), src(src), tgt(tgt), end(end) {};
   };
 
+  // BB -> <bw_visited, td_visited, ub exprs, jumpchoices, path>
   std::unordered_map<const BasicBlock*, std::tuple<bool, bool, 
                                                    std::optional<smt::expr>,
-                                                   std::vector<JumpChoice>>>
+                                                   std::vector<JumpChoice>,
+                                                   smt::expr>>
     ite_data;
 
   // TODO will be removed later - only needed to store UB of each bb 
@@ -152,7 +154,8 @@ public:
 
   bool startBB(const BasicBlock &bb);
   void backwalk(const BasicBlock &bb);
-  smt::expr topdown();
+  // ub,path
+  std::pair<smt::expr, smt::expr> topdown();
   smt::expr gatherExprs(const JumpChoice &ch);
   std::optional<smt::expr> gatherExprs(const BasicBlock &bb);
 
