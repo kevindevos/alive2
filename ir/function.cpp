@@ -40,11 +40,15 @@ bool BasicBlock::hasCondJump() const {
 }
 
 bool BasicBlock::hasBranch() const {
-  return dynamic_cast<Branch*>(&(*m_instrs.back()));
+  if (auto br = dynamic_cast<Branch*>(&(*m_instrs.back())))
+    return br->getCond() != nullptr;
+  return false;
 }
 
 bool BasicBlock::hasSwitch() const {
-  return dynamic_cast<Switch*>(&(*m_instrs.back()));
+  if (auto sw = dynamic_cast<Switch*>(&(*m_instrs.back())))
+    return sw->getNumTargets() != 0;
+  return false;
 }
 
 unique_ptr<BasicBlock> BasicBlock::dup(const string &suffix) const {

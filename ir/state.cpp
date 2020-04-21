@@ -10,7 +10,6 @@
 #include <stack>
 
 // testing
-#include <smt/solver.h>
 #include <iostream>
 
 using namespace smt;
@@ -213,12 +212,12 @@ std::pair<expr, expr> State::topdown() {
         for (auto &choice : choices) {
           auto ch_exprs = gatherExprs(choice);
           val = val ? expr::mkIf(choice.cond, ch_exprs, *val) : ch_exprs;
-          path = path || (choice.cond && std::get<4>(ite_data[&choice.tgt]));
+          auto &tgt_path = std::get<4>(ite_data[&choice.end]);
+          path = path || (choice.cond && tgt_path);
         }
         auto cur_ub = gatherExprs(*cur);
         ub = val;
-        ub = ub ? (cur_ub ? *ub && *cur_ub : ub) 
-                            : cur_ub;
+        ub = ub ? (cur_ub ? *ub && *cur_ub : ub) : cur_ub;
       }
     }
   }
@@ -301,14 +300,12 @@ void State::addCondJump(const expr &cond, const BasicBlock &dst_true,
 void State::addReturn(const StateValue &val) {
   bb_ub_data[current_bb] = bb_ub();
  
-  std::cout << "OLD PATH: " << domain.path << "\n";
   if (current_bb != &f.getFirstBB()) {
     backwalk(*current_bb);
     auto [ub, path] = topdown();
     domain.UB = move(ub);
     // overwrite current domain.path for a more optimal one
     domain.path = move(path);
-    std::cout << "NEW PATH: " << domain.path << "\n";
     ite_data.clear();
   }
 
