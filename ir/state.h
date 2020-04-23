@@ -28,7 +28,25 @@ class DomTree;
 class State {
 public:
   using ValTy = std::pair<StateValue, std::set<smt::expr>>;
+  
+  struct JumpChoice {
+    const smt::expr cond;
+    const BasicBlock &src;
+    const BasicBlock &tgt;
+    const BasicBlock &end;
+    
+    JumpChoice(const smt::expr cond, const BasicBlock &src,
+                const BasicBlock &tgt, const BasicBlock &end)
+                : cond(cond), src(src), tgt(tgt), end(end) {};
+  };
 
+  // BB -> <bw_visited, td_visited, ub exprs, jumpchoices, path, phi>
+  using IteData = std::unordered_map<const BasicBlock*, 
+                                     std::tuple<bool, bool, 
+                                                std::optional<smt::expr>,
+                                                std::vector<JumpChoice>,
+                                                smt::expr,
+                                                std::optional<StateValue>>>;
 private:
   struct CurrentDomain {
     smt::expr path; // path from fn entry
@@ -111,35 +129,16 @@ private:
   };
   std::map<std::string, std::map<FnCallInput, FnCallOutput>> fn_call_data;
 
-  struct JumpChoice {
-    const smt::expr cond;
-    const BasicBlock &src;
-    const BasicBlock &tgt;
-    const BasicBlock &end;
-    
-    JumpChoice(const smt::expr cond, const BasicBlock &src,
-                const BasicBlock &tgt, const BasicBlock &end)
-                : cond(cond), src(src), tgt(tgt), end(end) {};
-  };
-
-  // BB -> <bw_visited, td_visited, ub exprs, jumpchoices, path>
-  std::unordered_map<const BasicBlock*, std::tuple<bool, bool, 
-                                                   std::optional<smt::expr>,
-                                                   std::vector<JumpChoice>,
-                                                   smt::expr>>
-    ite_data;
-
-  // TODO will be removed later - only needed to store UB of each bb 
-  // non-cumulatively - DomainPreds.UB will have to be expr instead of
-  // DisjointExpr
+  // isolated ub per BB
   std::unordered_map<const BasicBlock*, std::optional<smt::expr>> bb_ub_data;
+ 
+  // Data gathered during a backwalk when ite_data is not specified
+  IteData global_ite_data;
 
-  // store UB of current bb only // also will be removed later once the 
-  // original implementation is replaced.
-  smt::AndExpr bb_ub;
-
-  std::unique_ptr<DomTree> dom_tree; // TODO with optional
-
+  // store UB of current bb only 
+  smt::AndExpr current_bb_ub;
+  bool found_return = false;
+  std::unique_ptr<DomTree> dom_tree; 
 public:
   State(Function &f, bool source);
 
@@ -153,10 +152,15 @@ public:
   bool isUndef(const smt::expr &e) const;
 
   bool startBB(const BasicBlock &bb);
-  void backwalk(const BasicBlock &bb);
-  // ub,path
-  std::pair<smt::expr, smt::expr> topdown();
-  smt::expr gatherExprs(const JumpChoice &ch);
+
+  IteData* backwalk(IteData *ite_data, const BasicBlock &start, 
+                   const BasicBlock &end);
+  IteData* backwalk(const BasicBlock &start, const BasicBlock &end);
+  
+  void topdown(IteData *ite_data, const BasicBlock &start);
+  void topdown(const BasicBlock &start);
+  
+  smt::expr gatherExprs(IteData *ite_data, const JumpChoice &ch);
   std::optional<smt::expr> gatherExprs(const BasicBlock &bb);
 
   void addJump(const BasicBlock &dst);

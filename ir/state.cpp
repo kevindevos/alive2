@@ -118,7 +118,7 @@ bool State::startBB(const BasicBlock &bb) {
   current_bb = &bb;
 
   domain.reset();
-  bb_ub.reset();
+  current_bb_ub.reset();
 
   if (&f.getFirstBB() == &bb)
     return true;
@@ -128,6 +128,7 @@ bool State::startBB(const BasicBlock &bb) {
     return false;
 
   DisjointExpr<Memory> in_memory;
+  DisjointExpr<expr> UB;
   OrExpr path;
 
   for (auto &[src, data] : I->second) {
@@ -136,28 +137,31 @@ bool State::startBB(const BasicBlock &bb) {
     (void)cond;
     path.add(dom.path);
     expr p = dom.path();
+    UB.add_disj(dom.UB, p);
     in_memory.add_disj(mem, dom.path());
     domain.undef_vars.insert(dom.undef_vars.begin(), dom.undef_vars.end());
   }
 
   domain.path = path();
+  domain.UB.add(*UB());
   memory = *in_memory();
 
   return domain;
 }
 
-void State::backwalk(const BasicBlock &bb) {
-  const BasicBlock &entry = f.getFirstBB();
+State::IteData* State::backwalk(State::IteData *ite_data, 
+                                const BasicBlock &start, 
+                                const BasicBlock &end) {
   stack<pair<const BasicBlock*, const BasicBlock*>> S;
-  S.emplace(&bb, &bb);
+  S.emplace(&start, &start);
 
   while(!S.empty()) {
     auto [cur, marker] = S.top();
     S.pop();
-    auto &cur_data = ite_data[cur];
+    auto &cur_data = (*ite_data)[cur];
     bool &bw_visited = std::get<0>(cur_data);
 
-    if (bw_visited || cur == &entry)
+    if (bw_visited || cur == &end)
       continue;
     
     auto &preds = predecessor_data[cur];
@@ -169,25 +173,35 @@ void State::backwalk(const BasicBlock &bb) {
       S.emplace(pred, marker);
 
       if (pred->hasCondJump() || predecessor_data[pred].size() > 1
-          || pred == &entry) {
+          || pred == &end) {
         auto &cond = std::get<2>(pred_data);
-        auto &pred_choices = std::get<3>(ite_data[pred]);
+        auto &pred_choices = std::get<3>((*ite_data)[pred]);
         pred_choices.emplace_back(*cond, *pred, *cur, *marker);
       }
     }
     bw_visited = true;
   }
+  return ite_data;
 }
 
-std::pair<expr, expr> State::topdown() {
-  const BasicBlock &entry = f.getFirstBB();
+State::IteData* State::backwalk(const BasicBlock &start, 
+                                const BasicBlock &end) {
+  return backwalk(&global_ite_data, start, end);
+}
+
+void State::topdown(State::IteData *ite_data, const BasicBlock &start) {
+  if (!found_return) {
+    return_domain = expr(false);
+    return;
+  }
+
   stack<const BasicBlock*> S;
-  S.push(&entry);
+  S.push(&start);
 
   while (!S.empty()) {
     auto cur = S.top();
     S.pop();
-    auto &cur_data = ite_data[cur];
+    auto &cur_data = (*ite_data)[cur];
     bool &td_visited = std::get<1>(cur_data);
     auto &path = std::get<4>(cur_data);
     
@@ -207,31 +221,40 @@ std::pair<expr, expr> State::topdown() {
       auto &ub = std::get<2>(cur_data);
       if (!ub) {
         auto &choices = std::get<3>(cur_data);
-        path = choices.empty() ? expr(true) : expr(false);
+        path = choices.empty() ? true : false;
         optional<expr> val;
         for (auto &choice : choices) {
-          auto ch_exprs = gatherExprs(choice);
-          val = val ? expr::mkIf(choice.cond, ch_exprs, *val) : ch_exprs;
-          auto &tgt_path = std::get<4>(ite_data[&choice.end]);
-          path = path || (choice.cond && tgt_path);
+          auto ch_ub = gatherExprs(ite_data, choice);
+          ub = ub ? expr::mkIf(choice.cond, ch_ub , *ub) : ch_ub;
+          auto &tgt_path = std::get<4>((*ite_data)[&choice.end]);
+          path |= choice.cond && tgt_path;
         }
         auto cur_ub = gatherExprs(*cur);
-        ub = val;
         ub = ub ? (cur_ub ? *ub && *cur_ub : ub) : cur_ub;
       }
     }
   }
-  auto &entry_data = ite_data[&entry];
-  auto &entry_ub = std::get<2>(entry_data);
-  auto &entry_path = std::get<4>(entry_data);
-  return {entry_ub ? *entry_ub : expr(true), entry_path};
+  auto &start_data = (*ite_data)[&start];
+  auto &ub = std::get<2>(start_data);
+  ub = ub ? *ub : true;
+  domain.UB = *ub;
+  domain.path = std::get<4>(start_data);
+  return_domain = domain();
+
+  // TODO debug
+  //std::cout << "UB: " << domain.UB << "\n";
+  //std::cout << "PATH: " << domain.path << "\n";
 }
 
-expr State::gatherExprs(const JumpChoice &ch) {
+void State::topdown(const BasicBlock &start) {
+  topdown(&global_ite_data, start);
+}
+
+expr State::gatherExprs(State::IteData *ite_data, const JumpChoice &ch) {
   expr e = expr(true);
   auto cur = &ch.tgt;
   while (true) {
-    auto &cur_data = ite_data[cur];
+    auto &cur_data = (*ite_data)[cur];
     auto &ub = std::get<2>(cur_data);
 
     if (ub) {
@@ -262,9 +285,7 @@ void State::addJump(const BasicBlock &dst0, expr &&cond) {
     dst = &f.getBB("#sink");
   }
 
-  // TODO will be integrated into DomainPreds later
-  bb_ub_data[current_bb] = bb_ub();
-
+  bb_ub_data[current_bb] = current_bb_ub();
   auto &data = predecessor_data[dst][current_bb];
   auto &domain_preds = std::get<0>(data);
   auto &mem = std::get<1>(data);
@@ -298,17 +319,10 @@ void State::addCondJump(const expr &cond, const BasicBlock &dst_true,
 }
 
 void State::addReturn(const StateValue &val) {
-  bb_ub_data[current_bb] = bb_ub();
- 
-  if (current_bb != &f.getFirstBB()) {
-    backwalk(*current_bb);
-    auto [ub, path] = topdown();
-    domain.UB = move(ub);
-    // overwrite current domain.path for a more optimal one
-    domain.path = move(path);
-    ite_data.clear();
-  }
-
+  bb_ub_data[current_bb] = current_bb_ub();
+  backwalk(&global_ite_data, *current_bb, f.getFirstBB());
+  found_return = true;
+  
   return_val.add(val, domain.path);
   return_memory.add(memory, domain.path);
   return_domain.add(domain());
@@ -320,21 +334,21 @@ void State::addReturn(const StateValue &val) {
 }
 
 void State::addUB(expr &&ub) {
-  bb_ub.add(ub);
+  current_bb_ub.add(ub);
   domain.UB.add(move(ub));
   if (!ub.isConst())
     domain.undef_vars.insert(undef_vars.begin(), undef_vars.end());
 }
 
 void State::addUB(const expr &ub) {
-  bb_ub.add(ub);
+  current_bb_ub.add(ub);
   domain.UB.add(ub);
   if (!ub.isConst())
     domain.undef_vars.insert(undef_vars.begin(), undef_vars.end());
 }
 
 void State::addUB(AndExpr &&ubs) {
-  bb_ub.add(ubs);
+  current_bb_ub.add(ubs);
   domain.UB.add(ubs);
   domain.undef_vars.insert(undef_vars.begin(), undef_vars.end());
 }
