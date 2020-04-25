@@ -9,9 +9,6 @@
 #include <cassert>
 #include <stack>
 
-// testing
-#include <iostream>
-
 using namespace smt;
 using namespace util;
 using namespace std;
@@ -118,7 +115,6 @@ bool State::startBB(const BasicBlock &bb) {
   current_bb = &bb;
 
   domain.reset();
-  current_bb_ub.reset();
 
   if (&f.getFirstBB() == &bb)
     return true;
@@ -128,7 +124,6 @@ bool State::startBB(const BasicBlock &bb) {
     return false;
 
   DisjointExpr<Memory> in_memory;
-  DisjointExpr<expr> UB;
   OrExpr path;
 
   for (auto &[src, data] : I->second) {
@@ -137,13 +132,11 @@ bool State::startBB(const BasicBlock &bb) {
     (void)cond;
     path.add(dom.path);
     expr p = dom.path();
-    UB.add_disj(dom.UB, p);
     in_memory.add_disj(mem, dom.path());
     domain.undef_vars.insert(dom.undef_vars.begin(), dom.undef_vars.end());
   }
 
   domain.path = path();
-  domain.UB.add(*UB());
   memory = *in_memory();
 
   return domain;
@@ -159,23 +152,23 @@ State::IteData* State::backwalk(State::IteData *ite_data,
     auto [cur, marker] = S.top();
     S.pop();
     auto &cur_data = (*ite_data)[cur];
-    bool &bw_visited = std::get<0>(cur_data);
+    bool &bw_visited = get<0>(cur_data);
 
     if (bw_visited || cur == &end)
       continue;
     
     auto &preds = predecessor_data[cur];
-    if (preds.size() > 1 || cur->hasCondJump()) {
+    if (cur->hasCondJump() || preds.size() > 1) {
       marker = cur;
     }
 
     for (auto &[pred, pred_data] : preds) {
       S.emplace(pred, marker);
 
-      if (pred->hasCondJump() || predecessor_data[pred].size() > 1
-          || pred == &end) {
-        auto &cond = std::get<2>(pred_data);
-        auto &pred_choices = std::get<3>((*ite_data)[pred]);
+      if (pred->hasCondJump() || pred == &end
+          || predecessor_data[pred].size() > 1) {
+        auto &cond = get<2>(pred_data);
+        auto &pred_choices = get<3>((*ite_data)[pred]);
         pred_choices.emplace_back(*cond, *pred, *cur, *marker);
       }
     }
@@ -191,7 +184,7 @@ State::IteData* State::backwalk(const BasicBlock &start,
 
 void State::topdown(State::IteData *ite_data, const BasicBlock &start) {
   if (!found_return) {
-    return_domain = expr(false);
+    return_domain = false;
     return;
   }
 
@@ -202,8 +195,7 @@ void State::topdown(State::IteData *ite_data, const BasicBlock &start) {
     auto cur = S.top();
     S.pop();
     auto &cur_data = (*ite_data)[cur];
-    bool &td_visited = std::get<1>(cur_data);
-    auto &path = std::get<4>(cur_data);
+    bool &td_visited = get<1>(cur_data);
     
     // On first visit add all children to the stack after current to guarantee
     // the smt expressions for all children are built before the parent's
@@ -211,39 +203,38 @@ void State::topdown(State::IteData *ite_data, const BasicBlock &start) {
       // visit again only after all children have been visited
       S.push(cur);
 
-      auto &choices = std::get<3>(cur_data);
-      for (auto &choice : choices) {
+      for (auto &choice : get<3>(cur_data)) {
         S.push(&choice.end);
       }
       td_visited = true;
     } else {
       // On second visit, construct smt expressions if we haven't done so yet
-      auto &ub = std::get<2>(cur_data);
+      auto &ub = get<2>(cur_data);
       if (!ub) {
-        auto &choices = std::get<3>(cur_data);
-        path = choices.empty() ? true : false;
-        optional<expr> val;
+        auto &choices = get<3>(cur_data);
+        auto &path = get<4>(cur_data);
+        path = choices.empty();
+       
         for (auto &choice : choices) {
-          auto ch_ub = gatherExprs(ite_data, choice);
-          ub = ub ? expr::mkIf(choice.cond, ch_ub , *ub) : ch_ub;
-          auto &tgt_path = std::get<4>((*ite_data)[&choice.end]);
-          path |= choice.cond && tgt_path;
+          auto &end_data = (*ite_data)[&choice.end];
+          auto &end_ub = get<2>(end_data);
+          if (!end_ub)
+            end_ub = bb_ub[&choice.end];
+
+          auto ch_ub = gatherExprs(ite_data, choice) && *end_ub;
+          ub = ub ? expr::mkIf(choice.cond, move(ch_ub), *ub) : move(ch_ub);
+          path |= choice.cond && get<4>(end_data);
         }
-        auto cur_ub = gatherExprs(*cur);
-        ub = ub ? (cur_ub ? *ub && *cur_ub : ub) : cur_ub;
+        
+        auto cur_ub = bb_ub[cur];
+        ub = ub ? *ub && cur_ub : cur_ub;
       }
     }
   }
   auto &start_data = (*ite_data)[&start];
-  auto &ub = std::get<2>(start_data);
-  ub = ub ? *ub : true;
-  domain.UB = *ub;
-  domain.path = std::get<4>(start_data);
+  domain.UB = *get<2>(start_data);
+  domain.path = get<4>(start_data);
   return_domain = domain();
-
-  // TODO debug
-  //std::cout << "UB: " << domain.UB << "\n";
-  //std::cout << "PATH: " << domain.path << "\n";
 }
 
 void State::topdown(const BasicBlock &start) {
@@ -251,29 +242,21 @@ void State::topdown(const BasicBlock &start) {
 }
 
 expr State::gatherExprs(State::IteData *ite_data, const JumpChoice &ch) {
-  expr e = expr(true);
+  expr e = true;
   auto cur = &ch.tgt;
-  while (true) {
+  while (cur != &ch.end) {
     auto &cur_data = (*ite_data)[cur];
-    auto &ub = std::get<2>(cur_data);
+    auto &ub = get<2>(cur_data);
 
     if (ub) {
       e = e && *ub;
       break;
     }
-    auto bb_ub = gatherExprs(*cur);
-    e = bb_ub ? e && *bb_ub : e;
-
-    if (cur != &ch.end)
-      cur = &(*cur->hasJump()->targets().begin());
-    else
-      break;
+    
+    e = e && bb_ub[cur];
+    cur = &(*cur->hasJump()->targets().begin());
   }
   return e;
-}
-
-optional<expr> State::gatherExprs(const BasicBlock &bb) {
-  return bb_ub_data[&bb];
 }
 
 void State::addJump(const BasicBlock &dst0, expr &&cond) {
@@ -285,13 +268,11 @@ void State::addJump(const BasicBlock &dst0, expr &&cond) {
     dst = &f.getBB("#sink");
   }
 
-  bb_ub_data[current_bb] = current_bb_ub();
+  bb_ub[current_bb] = domain.UB();
   auto &data = predecessor_data[dst][current_bb];
-  auto &domain_preds = std::get<0>(data);
-  auto &mem = std::get<1>(data);
-  // set standalone cond, or with existing if > 1 jump for same src->tgt pair
-  // for example switch case and default jump to same source and tgt
-  auto &c = std::get<2>(data);
+  auto &domain_preds = get<0>(data);
+  auto &mem = get<1>(data);
+  auto &c = get<2>(data);
   c = c ? *c || cond : cond;
   
   cond &= domain.path;
@@ -319,7 +300,7 @@ void State::addCondJump(const expr &cond, const BasicBlock &dst_true,
 }
 
 void State::addReturn(const StateValue &val) {
-  bb_ub_data[current_bb] = current_bb_ub();
+  bb_ub[current_bb] = domain.UB(); // store isolated UB
   backwalk(&global_ite_data, *current_bb, f.getFirstBB());
   found_return = true;
   
@@ -334,21 +315,18 @@ void State::addReturn(const StateValue &val) {
 }
 
 void State::addUB(expr &&ub) {
-  current_bb_ub.add(ub);
   domain.UB.add(move(ub));
   if (!ub.isConst())
     domain.undef_vars.insert(undef_vars.begin(), undef_vars.end());
 }
 
 void State::addUB(const expr &ub) {
-  current_bb_ub.add(ub);
   domain.UB.add(ub);
   if (!ub.isConst())
     domain.undef_vars.insert(undef_vars.begin(), undef_vars.end());
 }
 
 void State::addUB(AndExpr &&ubs) {
-  current_bb_ub.add(ubs);
   domain.UB.add(ubs);
   domain.undef_vars.insert(undef_vars.begin(), undef_vars.end());
 }

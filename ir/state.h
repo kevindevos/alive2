@@ -129,15 +129,17 @@ private:
   std::map<std::string, std::map<FnCallInput, FnCallOutput>> fn_call_data;
 
   // isolated ub per BB
-  std::unordered_map<const BasicBlock*, std::optional<smt::expr>> bb_ub_data;
+  std::unordered_map<const BasicBlock*, smt::expr> bb_ub;
  
-  // Data gathered during a backwalk when ite_data is not specified
+  // data gathered during a backwalk for later construction of better smt 
+  // formulas with ite's
   IteData global_ite_data;
+  
+  // dominator tree
+  std::unique_ptr<DomTree> dom_tree;
 
-  // store UB of current bb only 
-  smt::AndExpr current_bb_ub;
-  bool found_return = false;
-  std::unique_ptr<DomTree> dom_tree; 
+  // have return_domain = false if no return instr found
+  bool found_return = false; 
 public:
   State(Function &f, bool source);
 
@@ -160,7 +162,6 @@ public:
   void topdown(const BasicBlock &start);
   
   smt::expr gatherExprs(IteData *ite_data, const JumpChoice &ch);
-  std::optional<smt::expr> gatherExprs(const BasicBlock &bb);
 
   void addJump(const BasicBlock &dst);
   // boolean cond
