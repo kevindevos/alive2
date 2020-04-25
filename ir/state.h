@@ -40,10 +40,9 @@ public:
                 : cond(cond), src(src), tgt(tgt), end(end) {};
   };
 
-  // BB -> <bw_visited, td_visited, ub exprs, jumpchoices, path, phi>
+  // BB -> <td_visited, ub exprs, jumpchoices, path, phi>
   using IteData = std::unordered_map<const BasicBlock*, 
-                                     std::tuple<bool, bool, 
-                                                std::optional<smt::expr>,
+                                     std::tuple<bool, std::optional<smt::expr>,
                                                 std::vector<JumpChoice>,
                                                 smt::expr,
                                                 std::optional<StateValue>>>;
@@ -129,12 +128,15 @@ private:
   };
   std::map<std::string, std::map<FnCallInput, FnCallOutput>> fn_call_data;
 
+
   // isolated ub per BB
   std::unordered_map<const BasicBlock*, smt::expr> bb_ub;
  
   // data gathered during a backwalk for later construction of better smt 
   // formulas with ite's
   IteData global_ite_data;
+
+  std::unordered_map<const BasicBlock*, bool> global_bw_visited;
   
   // dominator tree
   std::unique_ptr<DomTree> dom_tree;
@@ -155,8 +157,10 @@ public:
 
   bool startBB(const BasicBlock &bb);
 
-  IteData* backwalk(IteData *ite_data, const BasicBlock &start, 
-                   const BasicBlock &end);
+  IteData* backwalk(IteData *ite_data, 
+                    std::unordered_map<const BasicBlock*, bool> &visited,
+                    const BasicBlock &start, 
+                    const BasicBlock &end);
   IteData* backwalk(const BasicBlock &start, const BasicBlock &end);
   
   void topdown(IteData *ite_data, const BasicBlock &start);

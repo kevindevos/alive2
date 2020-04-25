@@ -143,6 +143,7 @@ bool State::startBB(const BasicBlock &bb) {
 }
 
 State::IteData* State::backwalk(State::IteData *ite_data, 
+                                unordered_map<const BasicBlock*, bool> &v,
                                 const BasicBlock &start, 
                                 const BasicBlock &end) {
   stack<pair<const BasicBlock*, const BasicBlock*>> S;
@@ -151,10 +152,9 @@ State::IteData* State::backwalk(State::IteData *ite_data,
   while(!S.empty()) {
     auto [cur, marker] = S.top();
     S.pop();
-    auto &cur_data = (*ite_data)[cur];
-    bool &bw_visited = get<0>(cur_data);
+    bool &visited = v[cur];
 
-    if (bw_visited || cur == &end)
+    if (visited || cur == &end)
       continue;
     
     auto &preds = predecessor_data[cur];
@@ -168,18 +168,18 @@ State::IteData* State::backwalk(State::IteData *ite_data,
       if (pred->hasCondJump() || pred == &end
           || predecessor_data[pred].size() > 1) {
         auto &cond = get<2>(pred_data);
-        auto &pred_choices = get<3>((*ite_data)[pred]);
+        auto &pred_choices = get<2>((*ite_data)[pred]);
         pred_choices.emplace_back(*cond, *pred, *cur, *marker);
       }
     }
-    bw_visited = true;
+    visited = true;
   }
   return ite_data;
 }
 
 State::IteData* State::backwalk(const BasicBlock &start, 
                                 const BasicBlock &end) {
-  return backwalk(&global_ite_data, start, end);
+  return backwalk(&global_ite_data, global_bw_visited, start, end);
 }
 
 void State::topdown(State::IteData *ite_data, const BasicBlock &start) {
@@ -195,7 +195,7 @@ void State::topdown(State::IteData *ite_data, const BasicBlock &start) {
     auto cur = S.top();
     S.pop();
     auto &cur_data = (*ite_data)[cur];
-    bool &td_visited = get<1>(cur_data);
+    bool &td_visited = get<0>(cur_data);
     
     // On first visit add all children to the stack after current to guarantee
     // the smt expressions for all children are built before the parent's
@@ -203,27 +203,27 @@ void State::topdown(State::IteData *ite_data, const BasicBlock &start) {
       // visit again only after all children have been visited
       S.push(cur);
 
-      for (auto &choice : get<3>(cur_data)) {
+      for (auto &choice : get<2>(cur_data)) {
         S.push(&choice.end);
       }
       td_visited = true;
     } else {
       // On second visit, construct smt expressions if we haven't done so yet
-      auto &ub = get<2>(cur_data);
+      auto &ub = get<1>(cur_data);
       if (!ub) {
-        auto &choices = get<3>(cur_data);
-        auto &path = get<4>(cur_data);
+        auto &choices = get<2>(cur_data);
+        auto &path = get<3>(cur_data);
         path = choices.empty();
        
         for (auto &choice : choices) {
           auto &end_data = (*ite_data)[&choice.end];
-          auto &end_ub = get<2>(end_data);
+          auto &end_ub = get<1>(end_data);
           if (!end_ub)
             end_ub = bb_ub[&choice.end];
 
           auto ch_ub = gatherExprs(ite_data, choice) && *end_ub;
           ub = ub ? expr::mkIf(choice.cond, move(ch_ub), *ub) : move(ch_ub);
-          path |= choice.cond && get<4>(end_data);
+          path |= choice.cond && get<3>(end_data);
         }
         
         auto cur_ub = bb_ub[cur];
@@ -232,8 +232,8 @@ void State::topdown(State::IteData *ite_data, const BasicBlock &start) {
     }
   }
   auto &start_data = (*ite_data)[&start];
-  domain.UB = *get<2>(start_data);
-  domain.path = get<4>(start_data);
+  domain.UB = *get<1>(start_data);
+  domain.path = get<3>(start_data);
   return_domain = domain();
 }
 
@@ -246,7 +246,7 @@ expr State::gatherExprs(State::IteData *ite_data, const JumpChoice &ch) {
   auto cur = &ch.tgt;
   while (cur != &ch.end) {
     auto &cur_data = (*ite_data)[cur];
-    auto &ub = get<2>(cur_data);
+    auto &ub = get<1>(cur_data);
 
     if (ub) {
       e = e && *ub;
@@ -301,7 +301,7 @@ void State::addCondJump(const expr &cond, const BasicBlock &dst_true,
 
 void State::addReturn(const StateValue &val) {
   bb_ub[current_bb] = domain.UB(); // store isolated UB
-  backwalk(&global_ite_data, *current_bb, f.getFirstBB());
+  backwalk(*current_bb, f.getFirstBB());
   found_return = true;
   
   return_val.add(val, domain.path);
