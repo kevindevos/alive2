@@ -13,6 +13,8 @@ using namespace smt;
 using namespace util;
 using namespace std;
 
+#include <iostream>
+
 namespace IR {
 
 expr State::CurrentDomain::operator()() const {
@@ -212,8 +214,6 @@ void State::topdown(State::IteData *ite_data, const BasicBlock &start) {
       auto &ub = get<1>(cur_data);
       if (!ub) {
         auto &choices = get<2>(cur_data);
-        auto &path = get<3>(cur_data);
-        path = choices.empty();
        
         for (auto &choice : choices) {
           auto &end_data = (*ite_data)[&choice.end];
@@ -223,7 +223,6 @@ void State::topdown(State::IteData *ite_data, const BasicBlock &start) {
 
           auto ch_ub = gatherExprs(ite_data, choice) && *end_ub;
           ub = ub ? expr::mkIf(choice.cond, move(ch_ub), *ub) : move(ch_ub);
-          path |= choice.cond && get<3>(end_data);
         }
         
         auto cur_ub = bb_ub[cur];
@@ -231,10 +230,7 @@ void State::topdown(State::IteData *ite_data, const BasicBlock &start) {
       }
     }
   }
-  auto &start_data = (*ite_data)[&start];
-  domain.UB = *get<1>(start_data);
-  domain.path = get<3>(start_data);
-  return_domain = domain();
+  return_domain &= *get<1>((*ite_data)[&start]);
 }
 
 void State::topdown(const BasicBlock &start) {
