@@ -41,7 +41,7 @@ public:
   };
 
   // BB -> <td_visited, ub exprs, jumpchoices, path, phi>
-  using IteData = std::unordered_map<const BasicBlock*, 
+  using IteData = std::unordered_map<const BasicBlock*,
                                      std::tuple<bool, std::optional<smt::expr>,
                                                 std::vector<JumpChoice>,
                                                 smt::expr,
@@ -142,7 +142,7 @@ private:
   std::unique_ptr<DomTree> dom_tree;
 
   // have return_domain = false if no return instr found
-  bool found_return = false; 
+  bool found_return = false;
 public:
   State(Function &f, bool source);
 
@@ -157,9 +157,9 @@ public:
 
   bool startBB(const BasicBlock &bb);
 
-  IteData* backwalk(IteData *ite_data, 
+  IteData* backwalk(IteData *ite_data,
                     std::unordered_map<const BasicBlock*, bool> &visited,
-                    const BasicBlock &start, 
+                    const BasicBlock &start,
                     const BasicBlock &end);
   IteData* backwalk(const BasicBlock &start, const BasicBlock &end);
   
