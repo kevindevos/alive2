@@ -13,8 +13,6 @@ using namespace smt;
 using namespace util;
 using namespace std;
 
-#include <iostream>
-
 namespace IR {
 
 expr State::CurrentDomain::operator()() const {
