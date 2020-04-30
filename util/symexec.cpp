@@ -49,7 +49,7 @@ void sym_exec(State &s) {
     first = false;
   }
   
-  s.topdown(f.getFirstBB());
+  s.buildUB();
 
   if (config::symexec_print_each_value) {
     cout << "domain = " << s.functionDomain()

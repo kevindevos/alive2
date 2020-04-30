@@ -28,24 +28,6 @@ class DomTree;
 class State {
 public:
   using ValTy = std::pair<StateValue, std::set<smt::expr>>;
-  
-  struct JumpChoice {
-    const smt::expr cond;
-    const BasicBlock &src;
-    const BasicBlock &tgt;
-    const BasicBlock &end;
-    
-    JumpChoice(const smt::expr cond, const BasicBlock &src,
-                const BasicBlock &tgt, const BasicBlock &end)
-                : cond(cond), src(src), tgt(tgt), end(end) {};
-  };
-
-  // BB -> <td_visited, ub exprs, jumpchoices, path, phi>
-  using IteData = std::unordered_map<const BasicBlock*,
-                                     std::tuple<bool, std::optional<smt::expr>,
-                                                std::vector<JumpChoice>,
-                                                smt::expr,
-                                                std::optional<StateValue>>>;
 private:
   struct CurrentDomain {
     smt::expr path; // path from fn entry
@@ -128,21 +110,15 @@ private:
   };
   std::map<std::string, std::map<FnCallInput, FnCallOutput>> fn_call_data;
 
+  // src -> <(dst, cond), isolated ub>
+  std::unordered_map<const BasicBlock*, std::pair<std::vector<std::pair<
+                                                              const BasicBlock*,
+                                                              smt::expr>>,
+                                                              smt::expr>>
+    target_data;
 
-  // isolated ub per BB
-  std::unordered_map<const BasicBlock*, smt::expr> bb_ub;
- 
-  // data gathered during a backwalk for later construction of better smt 
-  // formulas with ite's
-  IteData global_ite_data;
-
-  std::unordered_map<const BasicBlock*, bool> global_bw_visited;
-  
   // dominator tree
   std::unique_ptr<DomTree> dom_tree;
-
-  // have return_domain = false if no return instr found
-  bool found_return = false;
 public:
   State(Function &f, bool source);
 
@@ -156,18 +132,9 @@ public:
   bool isUndef(const smt::expr &e) const;
 
   bool startBB(const BasicBlock &bb);
-
-  IteData* backwalk(IteData *ite_data,
-                    std::unordered_map<const BasicBlock*, bool> &visited,
-                    const BasicBlock &start,
-                    const BasicBlock &end);
-  IteData* backwalk(const BasicBlock &start, const BasicBlock &end);
+  void buildUB();
+  void syncCurrentUB() { target_data[current_bb].second = domain.UB(); }
   
-  void topdown(IteData *ite_data, const BasicBlock &start);
-  void topdown(const BasicBlock &start);
-  
-  smt::expr gatherExprs(IteData *ite_data, const JumpChoice &ch);
-
   void addJump(const BasicBlock &dst);
   // boolean cond
   void addJump(smt::expr &&cond, const BasicBlock &dst);
