@@ -142,115 +142,43 @@ bool State::startBB(const BasicBlock &bb) {
   return domain;
 }
 
-State::IteData* State::backwalk(State::IteData *ite_data, 
-                                unordered_map<const BasicBlock*, bool> &v,
-                                const BasicBlock &start, 
-                                const BasicBlock &end) {
-  stack<pair<const BasicBlock*, const BasicBlock*>> S;
-  S.emplace(&start, &start);
-
-  while(!S.empty()) {
-    auto [cur, marker] = S.top();
-    S.pop();
-    bool &visited = v[cur];
-
-    if (visited || cur == &end)
-      continue;
-    
-    auto &preds = predecessor_data[cur];
-    if (cur->hasCondJump() || preds.size() > 1) {
-      marker = cur;
-    }
-
-    for (auto &[pred, pred_data] : preds) {
-      S.emplace(pred, marker);
-
-      if (pred->hasCondJump() || pred == &end
-          || predecessor_data[pred].size() > 1) {
-        auto &cond = get<2>(pred_data);
-        auto &pred_choices = get<2>((*ite_data)[pred]);
-        pred_choices.emplace_back(*cond, *pred, *cur, *marker);
-      }
-    }
-    visited = true;
-  }
-  return ite_data;
-}
-
-State::IteData* State::backwalk(const BasicBlock &start, 
-                                const BasicBlock &end) {
-  return backwalk(&global_ite_data, global_bw_visited, start, end);
-}
-
-void State::topdown(State::IteData *ite_data, const BasicBlock &start) {
-  if (!found_return) {
-    return_domain = false;
-    return;
-  }
-
+void State::buildUB() {
+  unordered_map<const BasicBlock*, pair<bool, optional<expr>>> build_data;
   stack<const BasicBlock*> S;
-  S.push(&start);
+  S.push(&f.getFirstBB());
 
   while (!S.empty()) {
-    auto cur = S.top();
+    auto cur_bb = S.top();
     S.pop();
-    auto &cur_data = (*ite_data)[cur];
-    bool &td_visited = get<0>(cur_data);
-    
-    // On first visit add all children to the stack after current to guarantee
-    // the smt expressions for all children are built before the parent's
-    if (!td_visited) {
-      // visit again only after all children have been visited
-      S.push(cur);
 
-      for (auto &choice : get<2>(cur_data)) {
-        S.push(&choice.end);
-      }
-      td_visited = true;
-    } else {
-      // On second visit, construct smt expressions if we haven't done so yet
-      auto &ub = get<1>(cur_data);
-      if (!ub) {
-        auto &choices = get<2>(cur_data);
-       
-        for (auto &choice : choices) {
-          auto &end_data = (*ite_data)[&choice.end];
-          auto &end_ub = get<1>(end_data);
-          if (!end_ub)
-            end_ub = bb_ub[&choice.end];
+    auto &[visited, ub] = build_data[cur_bb];
+    if (!visited) {
+      visited = true;
+      S.push(cur_bb);
 
-          auto ch_ub = gatherExprs(ite_data, choice) && *end_ub;
-          ub = ub ? expr::mkIf(choice.cond, move(ch_ub), *ub) : move(ch_ub);
+      if (auto jmp = dynamic_cast<JumpInstr*>(&cur_bb->back())) {
+        auto tgts = jmp->targets();
+        for (auto I = tgts.begin(), E = tgts.end(); I != E; ++I) {
+          S.push(&(*I));
         }
-        
-        auto cur_ub = bb_ub[cur];
+      }
+    } else {
+      if (!ub) {
+        auto &cur_data = target_data[cur_bb];
+        for (auto &[tgt_bb, cond] : cur_data.first) {
+          auto &tgt_ub = build_data[tgt_bb].second;
+          if (!tgt_ub)
+            tgt_ub = target_data[tgt_bb].second;
+
+          ub = ub ? expr::mkIf(cond, *tgt_ub, *ub) : tgt_ub;
+        }
+        auto &cur_ub = cur_data.second;
         ub = ub ? *ub && cur_ub : cur_ub;
       }
     }
   }
-  return_domain &= *get<1>((*ite_data)[&start]);
-}
-
-void State::topdown(const BasicBlock &start) {
-  topdown(&global_ite_data, start);
-}
-
-expr State::gatherExprs(State::IteData *ite_data, const JumpChoice &ch) {
-  expr e = true;
-  auto cur = &ch.tgt;
-  while (cur != &ch.end) {
-    auto &cur_data = (*ite_data)[cur];
-    auto &ub = get<1>(cur_data);
-
-    if (ub) {
-      e = e && *ub;
-      break;
-    }
-    
-    e = e && bb_ub[cur];
-    cur = &(*cur->hasJump()->targets().begin());
-  }
-  return e;
+  domain.UB = *build_data[&f.getFirstBB()].second;
+  return_domain &= domain.UB();
 }
 
 void State::addJump(const BasicBlock &dst0, expr &&cond) {
@@ -262,12 +190,16 @@ void State::addJump(const BasicBlock &dst0, expr &&cond) {
     dst = &f.getBB("#sink");
   }
 
-  bb_ub[current_bb] = domain.UB();
   auto &data = predecessor_data[dst][current_bb];
   auto &domain_preds = get<0>(data);
   auto &mem = get<1>(data);
   auto &c = get<2>(data);
-  c = c ? *c || cond : cond;
+  c = c ? *c || cond : cond; // when switch default and case have same target
+
+  auto &[tgt_data, ub] = target_data[current_bb];
+  if (dst == &dst0) // ignore #sink
+    tgt_data.emplace_back(dst, *c);
+  ub = domain.UB();
   
   cond &= domain.path;
   mem.add(memory, cond);
@@ -294,9 +226,7 @@ void State::addCondJump(const expr &cond, const BasicBlock &dst_true,
 }
 
 void State::addReturn(const StateValue &val) {
-  bb_ub[current_bb] = domain.UB(); // store isolated UB
-  backwalk(*current_bb, f.getFirstBB());
-  found_return = true;
+  target_data[current_bb].second = domain.UB(); // store isolated UB
   
   return_val.add(val, domain.path);
   return_memory.add(memory, domain.path);
