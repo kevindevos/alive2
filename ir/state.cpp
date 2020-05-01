@@ -142,11 +142,15 @@ bool State::startBB(const BasicBlock &bb) {
   return domain;
 }
 
+// Traverse the program graph similar to DFS to build UB as an ite expr tree
 void State::buildUB() {
   unordered_map<const BasicBlock*, pair<bool, optional<expr>>> build_data;
   stack<const BasicBlock*> S;
   S.push(&f.getFirstBB());
 
+  // 2 phases:
+  // 1º - visit and push tgts of this bb to ensure each target ub is built 1st
+  // 2º - second visit, build the ub as ite's by looping the targets
   while (!S.empty()) {
     auto cur_bb = S.top();
     S.pop();
@@ -156,15 +160,16 @@ void State::buildUB() {
       visited = true;
       S.push(cur_bb);
 
-      if (auto jmp = dynamic_cast<JumpInstr*>(&cur_bb->back())) {
-        auto tgts = jmp->targets();
-        for (auto I = tgts.begin(), E = tgts.end(); I != E; ++I) {
-          S.push(&(*I));
-        }
+      // targets in target_data do not include back-edges or jmps to #sink
+      auto &cur_data = target_data[cur_bb];
+      for (auto &[tgt_bb, cond] : cur_data.first) {
+        (void)cond;
+        S.push(tgt_bb);
       }
     } else {
       if (!ub) {
         auto &cur_data = target_data[cur_bb];
+        // build ub for targets
         for (auto &[tgt_bb, cond] : cur_data.first) {
           auto &tgt_ub = build_data[tgt_bb].second;
           if (!tgt_ub)
@@ -172,11 +177,13 @@ void State::buildUB() {
 
           ub = ub ? expr::mkIf(cond, *tgt_ub, *ub) : tgt_ub;
         }
+        // 'and' the isolated ub of cur_bb with the (if built) targets ub
         auto &cur_ub = cur_data.second;
         ub = ub ? *ub && cur_ub : cur_ub;
       }
     }
   }
+  // final ub is the ub constructed for the entry node of the program
   domain.UB = *build_data[&f.getFirstBB()].second;
   return_domain &= domain.UB();
 }
@@ -197,9 +204,9 @@ void State::addJump(const BasicBlock &dst0, expr &&cond) {
   c = c ? *c || cond : cond; // when switch default and case have same target
 
   auto &[tgt_data, ub] = target_data[current_bb];
-  if (dst == &dst0) // ignore #sink
+  if (dst == &dst0) // ignore #sink or back edges when building UB
     tgt_data.emplace_back(dst, *c);
-  ub = domain.UB();
+  ub = domain.UB(); // set UB for current_bb without ub from previous bb's
   
   cond &= domain.path;
   mem.add(memory, cond);
