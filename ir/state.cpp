@@ -169,17 +169,20 @@ void State::buildUB() {
     } else {
       if (!ub) {
         auto &cur_data = target_data[cur_bb];
+
+        // skip bb's that do not have ub defined, for ex those with assume 0
+        if (!cur_data.second)
+          continue;
+        
         // build ub for targets
         for (auto &[tgt_bb, cond] : cur_data.first) {
           auto &tgt_ub = build_data[tgt_bb].second;
-          if (!tgt_ub)
-            tgt_ub = target_data[tgt_bb].second;
-
-          ub = ub ? expr::mkIf(cond, *tgt_ub, *ub) : tgt_ub;
+          if (tgt_ub)
+            ub = ub ? expr::mkIf(cond, *tgt_ub, *ub) : tgt_ub;
         }
         // 'and' the isolated ub of cur_bb with the (if built) targets ub
         auto &cur_ub = cur_data.second;
-        ub = ub ? *ub && cur_ub : cur_ub;
+        ub = ub ? *ub && *cur_ub : cur_ub;
       }
     }
   }
