@@ -114,7 +114,8 @@ private:
   std::unordered_map<const BasicBlock*, std::pair<std::vector<std::pair<
                                                               const BasicBlock*,
                                                               smt::expr>>,
-                                                              smt::expr>>
+                                                              std::optional<
+                                                              smt::expr>>>
     target_data;
 
   // dominator tree
@@ -133,7 +134,7 @@ public:
 
   bool startBB(const BasicBlock &bb);
   void buildUB();
-  void syncCurrentUB() { target_data[current_bb].second = domain.UB(); }
+  bool foundReturn() const { return !return_val.empty(); }
   
   void addJump(const BasicBlock &dst);
   // boolean cond
