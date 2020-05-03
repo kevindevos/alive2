@@ -170,7 +170,7 @@ void State::buildUB() {
       if (!ub) {
         auto &cur_data = target_data[cur_bb];
 
-        // skip bb's that do not have ub defined, for ex those with assume 0
+        // skip bb's that do not have set ub (ex: bb only has back-edges)
         if (!cur_data.second)
           continue;
         
@@ -180,15 +180,18 @@ void State::buildUB() {
           if (tgt_ub)
             ub = ub ? expr::mkIf(cond, *tgt_ub, *ub) : tgt_ub;
         }
-        // 'and' the isolated ub of cur_bb with the (if built) targets ub
-        auto &cur_ub = cur_data.second;
-        ub = ub ? *ub && *cur_ub : cur_ub;
+        
+        // only add current ub if at least one target has set ub
+        if (ub || cur_data.first.empty()) {
+          // 'and' the isolated ub of cur_bb with the (if built) targets ub
+          auto &cur_ub = cur_data.second;
+          ub = ub ? *ub && *cur_ub : cur_ub;
+        }
       }
     }
   }
   // final ub is the ub constructed for the entry node of the program
-  domain.UB = *build_data[&f.getFirstBB()].second;
-  return_domain &= domain.UB();
+  return_domain &= *build_data[&f.getFirstBB()].second;
 }
 
 void State::addJump(const BasicBlock &dst0, expr &&cond) {
@@ -206,11 +209,13 @@ void State::addJump(const BasicBlock &dst0, expr &&cond) {
   auto &c = get<2>(data);
   c = c ? *c || cond : cond; // when switch default and case have same target
 
-  auto &[tgt_data, ub] = target_data[current_bb];
-  if (dst == &dst0) // ignore #sink or back edges when building UB
+  // ignore #sink or back edges when building UB
+  if (dst == &dst0) {
+    auto &[tgt_data, ub] = target_data[current_bb];
     tgt_data.emplace_back(dst, *c);
-  ub = domain.UB(); // set UB for current_bb without ub from previous bb's
-  
+    ub = domain.UB(); 
+  }
+
   cond &= domain.path;
   mem.add(memory, cond);
   domain_preds.path.add(move(cond));
