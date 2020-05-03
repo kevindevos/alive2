@@ -102,7 +102,7 @@ public:
   auto begin() const { return vals.begin(); }
   auto end() const   { return vals.end(); }
   auto size() const  { return vals.size(); }
-  auto empty() const { return vals.size() == 0; }
+  auto empty() const { return vals.empty(); }
 };
 
 
