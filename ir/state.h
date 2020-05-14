@@ -63,7 +63,7 @@ private:
   std::unordered_map<const Value*, unsigned> values_map;
   std::vector<std::tuple<const Value*, ValTy, bool>> values;
 
-  // dst BB -> src BB -> (domain data, memory)
+  // dst BB -> src BB -> (domain data, memory, jump_cond)
   std::unordered_map<const BasicBlock*,
                      std::unordered_map<const BasicBlock*,
                                         std::tuple<DomainPreds,
@@ -110,12 +110,11 @@ private:
   std::map<std::string, std::map<FnCallInput, FnCallOutput>> fn_call_data;
 
   // src -> <(dst, cond), isolated ub>
-  std::unordered_map<const BasicBlock*, std::pair<std::vector<std::pair<
-                                                              const BasicBlock*,
-                                                              smt::expr>>,
-                                                              std::optional<
-                                                              smt::expr>>>
-    target_data;
+  struct TargetData {
+    std::vector<std::pair<const BasicBlock*, smt::expr>> dsts;
+    std::optional<smt::expr> ub;
+  };
+  std::unordered_map<const BasicBlock*, TargetData> target_data;
 
   // dominator tree
   std::unique_ptr<DomTree> dom_tree;

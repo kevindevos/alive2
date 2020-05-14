@@ -162,7 +162,7 @@ void State::buildUB() {
 
       // targets in target_data do not include back-edges or jmps to #sink
       auto &cur_data = target_data[cur_bb];
-      for (auto &[tgt_bb, cond] : cur_data.first) {
+      for (auto &[tgt_bb, cond] : cur_data.dsts) {
         (void)cond;
         S.push(tgt_bb);
       }
@@ -171,20 +171,20 @@ void State::buildUB() {
         auto &cur_data = target_data[cur_bb];
 
         // skip bb's that do not have set ub (ex: bb only has back-edges)
-        if (!cur_data.second)
+        if (!cur_data.ub)
           continue;
         
         // build ub for targets
-        for (auto &[tgt_bb, cond] : cur_data.first) {
+        for (auto &[tgt_bb, cond] : cur_data.dsts) {
           auto &tgt_ub = build_data[tgt_bb].second;
           if (tgt_ub)
             ub = ub ? expr::mkIf(cond, *tgt_ub, *ub) : tgt_ub;
         }
         
         // only add current ub if at least one target has set ub
-        if (ub || cur_data.first.empty()) {
+        if (ub || cur_data.dsts.empty()) {
           // 'and' the isolated ub of cur_bb with the (if built) targets ub
-          auto &cur_ub = cur_data.second;
+          auto &cur_ub = cur_data.ub;
           ub = ub ? *ub && *cur_ub : cur_ub;
         }
       }
@@ -241,7 +241,7 @@ void State::addCondJump(const expr &cond, const BasicBlock &dst_true,
 }
 
 void State::addReturn(const StateValue &val) {
-  target_data[current_bb].second = domain.UB(); // store isolated UB
+  target_data[current_bb].ub = domain.UB(); // store isolated UB
   
   return_val.add(val, domain.path);
   return_memory.add(memory, domain.path);
