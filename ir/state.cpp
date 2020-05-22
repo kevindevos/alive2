@@ -145,9 +145,39 @@ bool State::startBB(const BasicBlock &bb) {
   return domain;
 }
 
+bool State::canMoveExprsToDom(const BasicBlock &merge, const BasicBlock &dom) {
+  unordered_set<const BasicBlock*> seen_dom_targets;
+  unordered_map<const BasicBlock*, bool> v;
+  stack<const BasicBlock*> S;
+  S.push(&merge);
+  auto cur_bb = &merge;
+
+  while(!S.empty()) {
+    cur_bb = S.top();
+    S.pop();
+    auto &visited = v[cur_bb];
+    
+    if (!visited) {
+      visited = true;
+
+      for (auto const &pred : predecessor_data[cur_bb]) {
+        if (pred.first == &dom)
+          seen_dom_targets.insert(cur_bb);
+        else
+          S.push(pred.first);
+      }
+    }
+  }
+
+  auto jmp_instr = static_cast<JumpInstr*>(&(dom.back()));
+  return jmp_instr->getTargetCount() == seen_dom_targets.size();
+}
+
 // Traverse the program graph similar to DFS to build UB as an ite expr tree
 void State::buildUB() {
-  unordered_map<const BasicBlock*, pair<bool, optional<expr>>> build_data;
+  // bb -> <visited, ub, carry_ub> 
+  unordered_map<const BasicBlock*, tuple<bool, optional<expr>,
+                                         optional<expr>>> build_data;
   stack<const BasicBlock*> S;
   S.push(&f.getFirstBB());
 
@@ -158,7 +188,7 @@ void State::buildUB() {
     auto cur_bb = S.top();
     S.pop();
 
-    auto &[visited, ub] = build_data[cur_bb];
+    auto &[visited, ub, carry_ub] = build_data[cur_bb];
     if (!visited) {
       visited = true;
       S.push(cur_bb);
@@ -179,7 +209,7 @@ void State::buildUB() {
         
         // build ub for targets
         for (auto &[tgt_bb, cond] : cur_data.dsts) {
-          auto &tgt_ub = build_data[tgt_bb].second;
+          auto &tgt_ub = get<1>(build_data[tgt_bb]);
           if (tgt_ub)
             ub = ub ? expr::mkIf(cond, *tgt_ub, *ub) : tgt_ub;
         }
@@ -189,6 +219,22 @@ void State::buildUB() {
           // 'and' the isolated ub of cur_bb with the (if built) targets ub
           auto &cur_ub = cur_data.ub;
           ub = ub ? *ub && *cur_ub : cur_ub;
+          if (carry_ub)
+            ub = *ub && *carry_ub;
+
+          auto pred_data = predecessor_data[cur_bb];
+          if (pred_data.size() > 1) {
+            if (!dom_tree) {
+              cfg = make_unique<CFG>(f);
+              dom_tree = make_unique<DomTree>(f, *cfg);
+            }
+
+            auto &dom = *dom_tree->getIDominator(*cur_bb);
+            if (canMoveExprsToDom(*cur_bb, dom)) {
+              get<2>(build_data[&dom]) = move(ub);
+              ub = true;
+            }
+          }
         }
       }
     }
