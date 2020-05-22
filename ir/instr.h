@@ -305,6 +305,8 @@ public:
     target_iterator& operator++(void) { ++idx; return *this; }
     bool operator!=(target_iterator &rhs) const { return idx != rhs.idx; }
     bool operator==(target_iterator &rhs) const { return !(*this != rhs); }
+    const unsigned getIdx() const { return idx; }
+
   };
 
   class it_helper {
@@ -315,6 +317,7 @@ public:
     target_iterator end() const;
   };
   it_helper targets() { return this; }
+  unsigned getTargetCount() { return it_helper(this).end().getIdx() + 1; }
 };
 
 

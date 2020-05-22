@@ -23,6 +23,7 @@ namespace IR {
 class Value;
 class BasicBlock;
 class Function;
+class CFG;
 class DomTree;
 
 class State {
@@ -119,6 +120,7 @@ private:
 
   // dominator tree
   std::unique_ptr<DomTree> dom_tree;
+  std::unique_ptr<CFG> cfg;
 public:
   State(Function &f, bool source);
 
@@ -132,6 +134,7 @@ public:
   bool isUndef(const smt::expr &e) const;
 
   bool startBB(const BasicBlock &bb);
+  bool canMoveExprsToDom(const BasicBlock &merge, const BasicBlock &dom);
   void buildUB();
   bool foundReturn() const { return !return_val.empty(); }
   
