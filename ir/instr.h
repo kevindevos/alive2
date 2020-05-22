@@ -317,7 +317,7 @@ public:
     target_iterator end() const;
   };
   it_helper targets() { return this; }
-  unsigned getTargetCount() { return it_helper(this).end().getIdx() + 1; }
+  unsigned getTargetCount() { return it_helper(this).end().getIdx(); }
 };
 
 

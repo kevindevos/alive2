@@ -8,6 +8,7 @@
 #include "util/errors.h"
 #include <cassert>
 #include <stack>
+#include <iostream>
 
 using namespace smt;
 using namespace util;
@@ -143,7 +144,8 @@ bool State::startBB(const BasicBlock &bb) {
 }
 
 bool State::canMoveExprsToDom(const BasicBlock &merge, const BasicBlock &dom) {
-  unordered_set<const BasicBlock*> seen_dom_targets;
+  unordered_map<const BasicBlock*, unordered_set<const BasicBlock*>> 
+    bb_seen_targets;
   unordered_map<const BasicBlock*, bool> v;
   stack<const BasicBlock*> S;
   S.push(&merge);
@@ -158,16 +160,24 @@ bool State::canMoveExprsToDom(const BasicBlock &merge, const BasicBlock &dom) {
       visited = true;
 
       for (auto const &pred : predecessor_data[cur_bb]) {
-        if (pred.first == &dom)
-          seen_dom_targets.insert(cur_bb);
-        else
-          S.push(pred.first);
+        bb_seen_targets[pred.first].insert(cur_bb);
+        S.push(pred.first);
       }
     }
   }
 
-  auto jmp_instr = static_cast<JumpInstr*>(&(dom.back()));
-  return jmp_instr->getTargetCount() == seen_dom_targets.size();
+  bool can_move = true;
+  JumpInstr *jmp_instr;
+  for (auto &[bb, seen_targets] : bb_seen_targets) {
+    jmp_instr = static_cast<JumpInstr*>(&(bb->back()));
+    auto tgt_count = jmp_instr->getTargetCount();
+    if (auto sw = dynamic_cast<Switch*>(&(bb->back()))) {
+      (void)sw;
+      --tgt_count;
+    }
+    can_move &= tgt_count == seen_targets.size();
+  }
+  return can_move;
 }
 
 // Traverse the program graph similar to DFS to build UB as an ite expr tree
@@ -228,6 +238,8 @@ void State::buildUB() {
 
             auto &dom = *dom_tree->getIDominator(*cur_bb);
             if (canMoveExprsToDom(*cur_bb, dom)) {
+              cout << "moving " << *ub << " from bb " << cur_bb->getName()
+                   << " to bb " << dom.getName() << endl;
               get<2>(build_data[&dom]) = move(ub);
               ub = true;
             }
@@ -237,7 +249,9 @@ void State::buildUB() {
     }
   }
   // final ub is the ub constructed for the entry node of the program
-  return_domain &= *get<1>(build_data[&f.getFirstBB()]);
+  auto &UB = *get<1>(build_data[&f.getFirstBB()]);
+  return_domain &= UB;
+  cout << "UB:" << UB << endl;
 }
 
 void State::addJump(const BasicBlock &dst0, expr &&cond) {
