@@ -8,7 +8,6 @@
 #include "util/errors.h"
 #include <cassert>
 #include <stack>
-#include <iostream>
 
 using namespace smt;
 using namespace util;
@@ -169,18 +168,27 @@ bool State::canMoveExprsToDom(const BasicBlock &merge, const BasicBlock &dom) {
     }
   }
 
-  bool can_move = true;
   JumpInstr *jmp_instr;
   for (auto &[bb, seen_targets] : bb_seen_targets) {
-    jmp_instr = static_cast<JumpInstr*>(&(bb->back()));
+    jmp_instr = static_cast<JumpInstr*>(bb->back());
     auto tgt_count = jmp_instr->getTargetCount();
-    if (auto sw = dynamic_cast<Switch*>(&(bb->back()))) {
-      (void)sw;
-      --tgt_count;
+    tgt_count = dynamic_cast<Switch*>(bb->back()) ? tgt_count - 1 : tgt_count;
+    
+    if (seen_targets.size() != tgt_count) {
+      // If condition fails double check to exclude bb's with unreachable
+      // from counting
+      auto tgts = jmp_instr->targets();
+      for (auto I = tgts.begin(), E = tgts.end(); I != E; ++I) {
+        if (auto assume = dynamic_cast<Assume*>((*I).back())) {
+          if ((*this)[*assume->operands().front()].value.isZero())
+            --tgt_count;
+        }
+      }
+      if (seen_targets.size() != tgt_count)
+        return false;
     }
-    can_move &= tgt_count == seen_targets.size();
   }
-  return can_move;
+  return true;
 }
 
 // Traverse the program graph similar to DFS to build UB as an ite expr tree
@@ -241,8 +249,6 @@ void State::buildUB() {
 
             auto &dom = *dom_tree->getIDominator(*cur_bb);
             if (canMoveExprsToDom(*cur_bb, dom)) {
-              cout << "moving " << *ub << " from bb " << cur_bb->getName()
-                   << " to bb " << dom.getName() << endl;
               get<2>(build_data[&dom]) = move(ub);
               ub = true;
             }
