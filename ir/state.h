@@ -122,6 +122,11 @@ private:
   // dominator tree
   std::unique_ptr<DomTree> dom_tree;
   std::unique_ptr<CFG> cfg;
+
+  // a set to hold bb's during SE that do not lead to a return
+  // either they reach unreachable or a jump instruction with only back-edges
+  std::unordered_set<const BasicBlock*> no_ret_bbs;
+  std::unordered_map<const BasicBlock*,unsigned> back_edge_counter;
 public:
   State(Function &f, bool source);
 
@@ -138,6 +143,10 @@ public:
   bool canMoveExprsToDom(const BasicBlock &merge, const BasicBlock &dom);
   void buildUB();
   bool foundReturn() const { return !return_val.empty(); }
+
+  void propagateNoRetBB(const BasicBlock &bb);
+  void addNoRetBB(const BasicBlock &bb) { no_ret_bbs.insert(&bb); }
+  const BasicBlock& getCurrentBB() const { return *current_bb; }
   
   void addJump(const BasicBlock &dst);
   // boolean cond
