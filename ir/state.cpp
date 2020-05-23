@@ -8,6 +8,7 @@
 #include "util/errors.h"
 #include <cassert>
 #include <stack>
+#include <iostream>
 
 using namespace smt;
 using namespace util;
@@ -176,10 +177,8 @@ bool State::canMoveExprsToDom(const BasicBlock &merge, const BasicBlock &dom) {
       // from counting
       auto tgts = jmp_instr->targets();
       for (auto I = tgts.begin(), E = tgts.end(); I != E; ++I) {
-        if (auto assume = dynamic_cast<Assume*>((*I).back())) {
-          if ((*this)[*assume->operands().front()].value.isZero())
-            --tgt_count;
-        }
+        if (no_ret_bbs.find(&(*I)) != no_ret_bbs.end())
+          --tgt_count;
       }
       if (seen_targets.size() != tgt_count)
         return false;
@@ -256,6 +255,49 @@ void State::buildUB() {
   }
   // final ub is the ub constructed for the entry node of the program
   return_domain &= *get<1>(build_data[&f.getFirstBB()]);
+
+  // DEBUG
+  for (auto &bb : no_ret_bbs) {
+    cout << "no_ret_bb: " << bb->getName() << endl;
+  }
+}
+
+// walk up the CFG to add bb's to no_ret_bbs which when reached will always
+// lead execution to an unreachable or a back-edge
+// this is useful for ignoring unecessary paths quickly by checking no_ret_bbs
+void State::propagateNoRetBB(const BasicBlock &bb) {
+  stack<const BasicBlock*> S;
+
+  no_ret_bbs.insert(&bb);
+  for (auto &[pred, data] : predecessor_data[&bb])
+    S.push(pred);
+
+  while (!S.empty()) {
+    auto cur_bb = S.top();
+    S.pop();
+
+    // TODO when coming from assume 0, last instr is not a jump, but an assume
+    // which means this code is wrong and may not add the bb to no_ret_bbs properly
+    // maybe add a flag to the parameters or dynamic cast to assume first before trying jump
+    auto jmp_instr = static_cast<JumpInstr*>(cur_bb->back());
+    if (jmp_instr->getTargetCount() == 1) {
+      no_ret_bbs.insert(cur_bb);
+      for (auto &[pred, data] : predecessor_data[cur_bb])
+        S.push(pred);
+    } else {
+      unsigned no_ret_cnt = 0;
+      auto jmp_tgts = jmp_instr->targets();
+      for (auto I = jmp_tgts.begin(), E = jmp_tgts.end(); I != E; ++I) {
+        if (no_ret_bbs.find(&(*I)) != no_ret_bbs.end())
+          ++no_ret_cnt;
+      }
+      if (no_ret_cnt == jmp_instr->getTargetCount()) {
+        no_ret_bbs.insert(cur_bb);
+        for (auto &[pred, data] : predecessor_data[cur_bb])
+          S.push(pred);
+      }
+    }
+  }
 }
 
 void State::addJump(const BasicBlock &dst0, expr &&cond) {
@@ -265,6 +307,10 @@ void State::addJump(const BasicBlock &dst0, expr &&cond) {
   auto dst = &dst0;
   if (seen_bbs.count(dst)) {
     dst = &f.getBB("#sink");
+    auto &cnt = back_edge_counter[current_bb];
+    ++cnt;
+    if (cnt == static_cast<JumpInstr*>(current_bb->back())->getTargetCount())
+      propagateNoRetBB(*current_bb);
   }
 
   auto &data = predecessor_data[dst][current_bb];
