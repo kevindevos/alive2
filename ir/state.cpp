@@ -155,7 +155,7 @@ bool State::canMoveExprsToDom(const BasicBlock &merge, const BasicBlock &dom) {
     S.pop();
     auto &visited = v[cur_bb];
     
-    if (!visited) {
+    if (!visited && cur_bb != &dom) {
       visited = true;
 
       for (auto const &pred : predecessor_data[cur_bb]) {
