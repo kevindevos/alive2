@@ -1984,9 +1984,8 @@ StateValue Assume::toSMT(State &s) const {
     s.addUB(np.implies(v != 0));
   else
     s.addUB(np && v != 0);
-  if (v.isZero()) {
+  if (v.isZero())
     s.propagateNoRetBB(s.getCurrentBB());
-  }
   return {};
 }
 

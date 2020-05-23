@@ -8,7 +8,6 @@
 #include "util/errors.h"
 #include <cassert>
 #include <stack>
-#include <iostream>
 
 using namespace smt;
 using namespace util;
@@ -255,11 +254,6 @@ void State::buildUB() {
   }
   // final ub is the ub constructed for the entry node of the program
   return_domain &= *get<1>(build_data[&f.getFirstBB()]);
-
-  // DEBUG
-  for (auto &bb : no_ret_bbs) {
-    cout << "no_ret_bb: " << bb->getName() << endl;
-  }
 }
 
 // walk up the CFG to add bb's to no_ret_bbs which when reached will always
@@ -309,8 +303,10 @@ void State::addJump(const BasicBlock &dst0, expr &&cond) {
     dst = &f.getBB("#sink");
     auto &cnt = back_edge_counter[current_bb];
     ++cnt;
-    if (cnt == static_cast<JumpInstr*>(current_bb->back())->getTargetCount())
+    if (cnt == static_cast<JumpInstr*>(current_bb->back())->getTargetCount()) {
       propagateNoRetBB(*current_bb);
+      back_edge_counter.erase(current_bb);
+    }
   }
 
   auto &data = predecessor_data[dst][current_bb];

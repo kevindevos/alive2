@@ -144,7 +144,6 @@ public:
   bool foundReturn() const { return !return_val.empty(); }
 
   void propagateNoRetBB(const BasicBlock &bb);
-  void addNoRetBB(const BasicBlock &bb) { no_ret_bbs.insert(&bb); }
   const BasicBlock& getCurrentBB() const { return *current_bb; }
   
   void addJump(const BasicBlock &dst);
