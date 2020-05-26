@@ -187,12 +187,13 @@ class DomTree final {
     CFG &cfg;
 
     struct DomTreeNode {
-      const BasicBlock &bb;
+      const BasicBlock *bb;
       std::vector<DomTreeNode*> preds;
       DomTreeNode *dominator = nullptr;
       unsigned order;
 
-      DomTreeNode(const BasicBlock &bb) : bb(bb) {}
+      DomTreeNode() {};
+      DomTreeNode(const BasicBlock *bb) : bb(bb) {}
     };
 
     std::unordered_map<const BasicBlock*, DomTreeNode> doms;

@@ -293,20 +293,61 @@ void CFG::printDot(ostream &os) const {
 // Relies on Alive's top_sort run during llvm2alive conversion in order to
 // traverse the cfg in reverse postorder to build dominators.
 void DomTree::buildDominators() {
-  // initialization
-  unsigned i = f.getBBs().size();
-  for (auto &b : f.getBBs()) {
-    doms.emplace(b, *b).first->second.order = --i;
-  }
+  // data structures to exclude bb's and subtrees that are not reachable
+  unordered_set<const BasicBlock*> excluded_bbs;
+  unordered_map<const BasicBlock*, unordered_set<const BasicBlock*>> sucessors;
+  vector<const BasicBlock*> bbs;
+  
 
-  // build predecessors relationship
+  // build predecessors and sucessors relationship
   for (const auto &[src, tgt, instr] : cfg) {
     (void)instr;
-    doms.at(&tgt).preds.push_back(&doms.at(&src));
+    auto &tgt_dom = doms[&tgt];
+    auto &src_dom = doms[&src];
+    tgt_dom.bb = &tgt;
+    src_dom.bb = &src;
+
+    sucessors[&src].insert(&tgt);
+    tgt_dom.preds.push_back(&src_dom);
   }
 
-  auto &entry = doms.at(&f.getFirstBB());
+  // exclude dead bb's
+  auto &first_bb = f.getFirstBB();
+  unordered_set<const BasicBlock*> fBBs_copy;
+
+  for (auto b : f.getBBs())
+    if (doms[b].preds.empty() && b != &first_bb)
+      fBBs_copy.insert(b);
+
+  while (!fBBs_copy.empty()) {
+    for (auto I = fBBs_copy.begin(), E = fBBs_copy.end(); I != E; ++I) {
+      excluded_bbs.insert(*I);
+
+      for (auto succ : sucessors[*I]) {
+        auto &succ_dom = doms[succ];
+        auto it = find(succ_dom.preds.begin(), succ_dom.preds.end(), &doms[*I]);
+        succ_dom.preds.erase(it);
+        if (succ_dom.preds.empty())
+          fBBs_copy.insert(succ);
+      }
+
+      fBBs_copy.erase(I);
+    }
+  }
+
+
+  // initialization
+  unsigned i = f.getBBs().size() - excluded_bbs.size() + 1;
+  auto &entry = doms.at(&first_bb);
   entry.dominator = &entry;
+  entry.bb = &first_bb;
+
+  for (auto &b : f.getBBs()) {
+    if (excluded_bbs.find(b) == excluded_bbs.end()) {
+      doms[b].order = --i;
+      bbs.push_back(b);
+    }
+  }
 
   // Cooper, Keith D.; Harvey, Timothy J.; and Kennedy, Ken (2001). 
   // A Simple, Fast Dominance Algorithm
@@ -316,7 +357,7 @@ void DomTree::buildDominators() {
   bool changed;
   do {
     changed = false;
-    for (auto &b : f.getBBs()) {
+    for (auto &b : bbs) {
       auto &b_node = doms.at(b);
       if (b_node.preds.empty())
         continue;
@@ -349,7 +390,7 @@ DomTree::DomTreeNode* DomTree::intersect(DomTreeNode *f1, DomTreeNode *f2) {
 // get immediate dominator BasicBlock
 const BasicBlock* DomTree::getIDominator(const BasicBlock &bb) const {
   auto dom = doms.at(&bb).dominator;
-  return dom ? &dom->bb : nullptr;
+  return dom ? dom->bb : nullptr;
 }
 
 void DomTree::printDot(std::ostream &os) const {
