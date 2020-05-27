@@ -317,28 +317,24 @@ void DomTree::buildDominators() {
 
   // exclude dead bb's
   auto &first_bb = f.getFirstBB();
-  unordered_set<const BasicBlock*> fBBs_copy;
+  stack<const BasicBlock*> fBBs_copy;
 
   for (auto b : f.getBBs())
     if (doms[b].preds.empty() && b != &first_bb)
-      fBBs_copy.insert(b);
+      fBBs_copy.push(b);
 
   while (!fBBs_copy.empty()) {
-    for (auto I = fBBs_copy.begin(), E = fBBs_copy.end(); I != E; ++I) {
-      excluded_bbs.insert(*I);
+    auto bb = fBBs_copy.top();
+    fBBs_copy.pop();
 
-      for (auto succ : sucessors[*I]) {
-        auto &succ_dom = doms[succ];
-        auto it = find(succ_dom.preds.begin(), succ_dom.preds.end(), &doms[*I]);
-        succ_dom.preds.erase(it);
-        if (succ_dom.preds.empty())
-          fBBs_copy.insert(succ);
-      }
-
-      fBBs_copy.erase(I);
+    for (auto succ : sucessors[bb]) {
+      auto &succ_dom = doms[succ];
+      auto it = find(succ_dom.preds.begin(), succ_dom.preds.end(), &doms[bb]);
+      succ_dom.preds.erase(it);
+      if (succ_dom.preds.empty())
+        fBBs_copy.push(succ);
     }
   }
-
 
   // initialization
   unsigned i = f.getBBs().size() - excluded_bbs.size() + 1;
