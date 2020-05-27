@@ -296,12 +296,16 @@ void DomTree::buildDominators() {
   // data structures to exclude bb's and subtrees that are not reachable
   unordered_set<const BasicBlock*> excluded_bbs;
   unordered_map<const BasicBlock*, unordered_set<const BasicBlock*>> sucessors;
+  unordered_set<const BasicBlock*> visited_src;
   vector<const BasicBlock*> bbs;
-  
 
   // build predecessors and sucessors relationship
   for (const auto &[src, tgt, instr] : cfg) {
     (void)instr;
+    // skip back-edges
+    visited_src.insert(&src);
+    if (visited_src.find(&tgt) != visited_src.end())
+      continue;
     auto &tgt_dom = doms[&tgt];
     auto &src_dom = doms[&src];
     tgt_dom.bb = &tgt;
