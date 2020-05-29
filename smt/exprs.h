@@ -37,9 +37,11 @@ class OrExpr {
 
 public:
   void add(expr &&e);
+  void add(const expr &e);
   void add(const OrExpr &other);
   expr operator()() const;
   friend std::ostream &operator<<(std::ostream &os, const OrExpr &e);
+  void reset() { exprs.clear(); }
 };
 
 
