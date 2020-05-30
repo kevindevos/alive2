@@ -85,8 +85,10 @@ private:
 
   // return_domain: a boolean expression describing return condition
   smt::OrExpr return_domain;
+  // boolean expression describing all possible return paths only
+  smt::OrExpr return_path;
   // function_domain: a condition for function having well-defined behavior
-  smt::OrExpr function_domain;
+  smt::OrExpr function_domain; 
   smt::DisjointExpr<StateValue> return_val;
   smt::DisjointExpr<Memory> return_memory;
   std::set<smt::expr> return_undef_vars;

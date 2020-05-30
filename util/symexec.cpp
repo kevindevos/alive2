@@ -52,12 +52,10 @@ void sym_exec(State &s) {
   if (s.foundReturn())
     s.buildUB();
 
-  if (config::symexec_print_each_value) {
-    cout << "domain = " << s.functionDomain()
+  cout << "domain = " << s.functionDomain()
          << "\nreturn domain = " << s.returnDomain()
          << "\nreturn = " << s.returnVal().first
          << s.returnMemory() << "\n\n";
-  }
 }
 
 }
