@@ -1843,6 +1843,16 @@ void Switch::addTarget(Value &val, const BasicBlock &target) {
   targets.emplace_back(&val, target);
 }
 
+unsigned Switch::getNumUniqueTargets() const {
+  unordered_set<const BasicBlock*> unique_targets;
+  for (auto &[val, tgt] : targets) {
+    (void)val;
+    unique_targets.insert(&tgt);
+  }
+  unique_targets.insert(&default_target);
+  return unique_targets.size();
+}
+
 vector<Value*> Switch::operands() const {
   vector<Value*> ret = { value };
   for (auto &[val, target] : targets) {
