@@ -309,7 +309,13 @@ void State::addJump(const BasicBlock &dst0, expr &&cond) {
     dst = &f.getBB("#sink");
     auto &cnt = back_edge_counter[current_bb];
     ++cnt;
-    if (cnt == static_cast<JumpInstr*>(current_bb->back())->getTargetCount()) {
+    auto jump_instr = static_cast<JumpInstr*>(current_bb->back());
+    auto tgt_count = jump_instr->getTargetCount();
+    // in case of switch use unique target count
+    if (auto sw = dynamic_cast<Switch*>(jump_instr))
+      tgt_count = sw->getNumUniqueTargets();
+    
+    if (cnt == tgt_count) {
       propagateNoRetBB(*current_bb);
       back_edge_counter.erase(current_bb);
     }
