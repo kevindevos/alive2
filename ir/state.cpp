@@ -9,8 +9,6 @@
 #include <cassert>
 #include <stack>
 
-#include <iostream>
-
 using namespace smt;
 using namespace util;
 using namespace std;
