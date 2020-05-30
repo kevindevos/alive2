@@ -171,8 +171,14 @@ bool State::canMoveExprsToDom(const BasicBlock &merge, const BasicBlock &dom) {
   for (auto &[bb, seen_targets] : bb_seen_targets) {
     auto jmp_instr = static_cast<JumpInstr*>(bb->back());
     auto tgt_count = jmp_instr->getTargetCount();
-    if (dynamic_cast<Switch*>(bb->back())) 
-      --tgt_count;
+    // in case of switch only count number of unique targets
+    if (dynamic_cast<Switch*>(bb->back())) {
+      unordered_set<const BasicBlock*> unique_targets;
+      auto tgts = jmp_instr->targets();
+      for (auto I = tgts.begin(), E = tgts.end(); I != E; ++I)
+        unique_targets.insert(&(*I));
+      tgt_count = unique_targets.size();
+    }
     
     if (seen_targets.size() != tgt_count) {
       // If condition fails double check to exclude bb's with unreachable
