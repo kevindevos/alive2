@@ -9,6 +9,8 @@
 #include <cassert>
 #include <stack>
 
+#include <iostream>
+
 using namespace smt;
 using namespace util;
 using namespace std;
@@ -257,7 +259,7 @@ void State::buildUB() {
   }
   // replace return domain with return_path && better ub
   return_domain.reset();
-  return_domain.add(return_path() && *build_data[&f.getFirstBB()].second);
+  return_domain.add(return_path() && *get<1>(build_data[&f.getFirstBB()]));
 }
 
 // walk up the CFG to add bb's to no_ret_bbs which when reached will always
@@ -321,9 +323,9 @@ void State::addJump(const BasicBlock &dst0, expr &&cond) {
 
   // ignore #sink or back edges when building UB
   if (dst == &dst0) {
-    auto &[tgt_data, ub] = target_data[current_bb];
-    tgt_data.emplace_back(dst, *c);
-    ub = domain.UB(); 
+    auto &tgt_data = target_data[current_bb];
+    tgt_data.dsts.emplace_back(dst, *c);
+    tgt_data.ub = domain.UB();
   }
 
   cond &= domain.path;
@@ -352,7 +354,7 @@ void State::addCondJump(const expr &cond, const BasicBlock &dst_true,
 }
 
 void State::addReturn(const StateValue &val) {
-  target_data[current_bb].ub = domain.UB(); // store isolated UB
+  target_data[current_bb].ub = domain.UB();
   
   return_val.add(val, domain.path);
   return_memory.add(memory, domain.path);
