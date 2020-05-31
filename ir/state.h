@@ -118,7 +118,7 @@ private:
     std::vector<std::pair<const BasicBlock*, smt::expr>> dsts;
     std::optional<smt::expr> ub;
   };
-  std::unordered_map<const BasicBlock*, TargetData> target_data;
+  std::unordered_map<const BasicBlock*, TargetData> global_target_data;
   
   // data structure to hold temporary UB when constructing it in buildUB()
   struct BuildUBData {
@@ -126,7 +126,7 @@ private:
     std::optional<smt::expr> ub;
     std::optional<smt::expr> carry_ub;
   };
-  std::unordered_map<const BasicBlock*, BuildUBData> build_UB_data;
+  std::unordered_map<const BasicBlock*, BuildUBData> global_build_ub_data;
   // dominator tree
   std::unique_ptr<DomTree> dom_tree;
   std::unique_ptr<CFG> cfg;
@@ -146,9 +146,19 @@ public:
   bool isUndef(const smt::expr &e) const;
 
   bool startBB(const BasicBlock &bb);
-  bool canMoveExprsToDom(const BasicBlock &merge, const BasicBlock &dom);
+  bool canMoveExprsToDom(const BasicBlock &merge, const BasicBlock &dom,
+                         std::unordered_map<const BasicBlock*, BuildUBData> 
+                         *bdata);
+  
+  void buildTargetData(std::unordered_map<const BasicBlock*, State::TargetData> 
+                       *tdata, const BasicBlock &end);
+  smt::expr&& buildUB();
   smt::expr&& buildUB(std::unordered_map<const BasicBlock*, TargetData> *tdata);
-  auto* targetData() { return &target_data; }
+  smt::expr&& buildUB(std::unordered_map<const BasicBlock*, TargetData> *tdata,
+                      std::unordered_map<const BasicBlock*, BuildUBData> 
+                      *bdata);
+  auto* targetData() { return &global_target_data; }
+  auto* buildUBData() { return &global_build_ub_data; }
   auto& returnPath() { return return_path; }
   void setReturnDomain(smt::expr &&ret_dom);
   void setFunctionDomain(const smt::expr &f_dom);
