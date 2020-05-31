@@ -119,12 +119,14 @@ private:
     std::optional<smt::expr> ub;
   };
   std::unordered_map<const BasicBlock*, TargetData> target_data;
+  
   // data structure to hold temporary UB when constructing it in buildUB()
-  // bb -> <visited, ub, carry_ub> 
-  std::unordered_map<const BasicBlock*, std::tuple<bool, 
-                                                   std::optional<smt::expr>,
-                                                   std::optional<smt::expr>>> 
-    build_UB_data;
+  struct BuildUBData {
+    bool visited;
+    std::optional<smt::expr> ub;
+    std::optional<smt::expr> carry_ub;
+  };
+  std::unordered_map<const BasicBlock*, BuildUBData> build_UB_data;
   // dominator tree
   std::unique_ptr<DomTree> dom_tree;
   std::unique_ptr<CFG> cfg;

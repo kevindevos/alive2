@@ -183,7 +183,7 @@ bool State::canMoveExprsToDom(const BasicBlock &merge, const BasicBlock &dom) {
       auto tgts = jmp_instr->targets();
       for (auto I = tgts.begin(), E = tgts.end(); I != E; ++I) {
         // if target has no UB, then it was ignored in buildUB and thus here too
-        if (!get<1>(build_UB_data[&(*I)]))
+        if (!build_UB_data[&(*I)].ub)
           --tgt_count;
       }
       if (seen_targets.size() != tgt_count)
@@ -226,7 +226,7 @@ void State::buildUB() {
         
         // build ub for targets
         for (auto &[tgt_bb, cond] : cur_data.dsts) {
-          auto &tgt_ub = get<1>(build_UB_data[tgt_bb]);
+          auto &tgt_ub = build_UB_data[tgt_bb].ub;
           if (tgt_ub)
             ub = ub ? expr::mkIf(cond, *tgt_ub, *ub) : tgt_ub;
         }
@@ -248,7 +248,7 @@ void State::buildUB() {
 
             auto &dom = *dom_tree->getIDominator(*cur_bb);
             if (canMoveExprsToDom(*cur_bb, dom)) {
-              get<2>(build_UB_data[&dom]) = move(ub);
+              build_UB_data[&dom].carry_ub = move(ub);
               ub = true;
             }
           }
@@ -258,9 +258,9 @@ void State::buildUB() {
   }
   // replace return domain with return_path && better ub
   return_domain.reset();
-  auto ret = return_path() && *get<1>(build_UB_data[&f.getFirstBB()]);
+  auto ret = return_path() && *build_UB_data[&f.getFirstBB()].ub;
   return_domain.add(ret);
-  
+
   if (!has_noreturn) {
     function_domain.reset();
     function_domain.add(ret);
