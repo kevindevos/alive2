@@ -194,7 +194,7 @@ bool State::canMoveExprsToDom(const BasicBlock &merge, const BasicBlock &dom) {
 }
 
 // Traverse the program graph similar to DFS to build UB as an ite expr tree
-void State::buildUB() {
+expr&& State::buildUB(unordered_map<const BasicBlock*, TargetData> *tdata) {
   stack<const BasicBlock*> S;
   S.push(&f.getFirstBB());
 
@@ -211,14 +211,14 @@ void State::buildUB() {
       S.push(cur_bb);
 
       // targets in target_data do not include back-edges or jmps to #sink
-      auto &cur_data = target_data[cur_bb];
+      auto &cur_data = (*tdata)[cur_bb];
       for (auto &[tgt_bb, cond] : cur_data.dsts) {
         (void)cond;
         S.push(tgt_bb);
       }
     } else {
       if (!ub) {
-        auto &cur_data = target_data[cur_bb];
+        auto &cur_data = (*tdata)[cur_bb];
 
         // skip bb's that do not have set ub (ex: bb only has back-edges)
         if (!cur_data.ub)
@@ -256,15 +256,17 @@ void State::buildUB() {
       }
     }
   }
-  // replace return domain with return_path && better ub
-  return_domain.reset();
-  auto ret = return_path() && *build_UB_data[&f.getFirstBB()].ub;
-  return_domain.add(ret);
+  return move(*build_UB_data[&f.getFirstBB()].ub);
+}
 
-  if (!has_noreturn) {
-    function_domain.reset();
-    function_domain.add(ret);
-  }
+void State::setReturnDomain(expr &&ret_dom) {
+  return_domain.reset();
+  return_domain.add(move(ret_dom));
+}
+
+void State::setFunctionDomain(const expr &f_dom) {
+  function_domain.reset();
+  function_domain.add(f_dom);
 }
 
 void State::addJump(const BasicBlock &dst0, expr &&cond) {

@@ -147,8 +147,13 @@ public:
 
   bool startBB(const BasicBlock &bb);
   bool canMoveExprsToDom(const BasicBlock &merge, const BasicBlock &dom);
-  void buildUB();
+  smt::expr&& buildUB(std::unordered_map<const BasicBlock*, TargetData> *tdata);
+  auto* targetData() { return &target_data; }
+  auto& returnPath() { return return_path; }
+  void setReturnDomain(smt::expr &&ret_dom);
+  void setFunctionDomain(const smt::expr &f_dom);
   bool foundReturn() const { return !return_val.empty(); }
+  bool foundNoReturnAttr() const { return has_noreturn; }
 
   void addJump(const BasicBlock &dst);
   // boolean cond
