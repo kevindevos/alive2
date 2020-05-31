@@ -78,6 +78,7 @@ private:
 
   // temp state
   CurrentDomain domain;
+  smt::AndExpr isolated_ub;
   Memory memory;
   std::set<smt::expr> undef_vars;
   std::array<StateValue, 32> tmp_values;

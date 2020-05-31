@@ -115,6 +115,7 @@ bool State::startBB(const BasicBlock &bb) {
   current_bb = &bb;
 
   domain.reset();
+  isolated_ub.reset();
 
   if (&f.getFirstBB() == &bb)
     return true;
@@ -279,7 +280,7 @@ void State::addJump(const BasicBlock &dst0, expr &&cond) {
   if (dst == &dst0) {
     auto &tgt_data = target_data[current_bb];
     tgt_data.dsts.emplace_back(dst, *c);
-    tgt_data.ub = domain.UB();
+    tgt_data.ub = isolated_ub();
   }
 
   cond &= domain.path;
@@ -308,7 +309,7 @@ void State::addCondJump(const expr &cond, const BasicBlock &dst_true,
 }
 
 void State::addReturn(const StateValue &val) {
-  target_data[current_bb].ub = domain.UB();
+  target_data[current_bb].ub = isolated_ub();
   
   return_val.add(val, domain.path);
   return_memory.add(memory, domain.path);
@@ -322,18 +323,21 @@ void State::addReturn(const StateValue &val) {
 }
 
 void State::addUB(expr &&ub) {
+  isolated_ub.add(ub);
   domain.UB.add(move(ub));
   if (!ub.isConst())
     domain.undef_vars.insert(undef_vars.begin(), undef_vars.end());
 }
 
 void State::addUB(const expr &ub) {
+  isolated_ub.add(ub);
   domain.UB.add(ub);
   if (!ub.isConst())
     domain.undef_vars.insert(undef_vars.begin(), undef_vars.end());
 }
 
 void State::addUB(AndExpr &&ubs) {
+  isolated_ub.add(ubs);
   domain.UB.add(ubs);
   domain.undef_vars.insert(undef_vars.begin(), undef_vars.end());
 }
