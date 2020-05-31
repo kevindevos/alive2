@@ -77,7 +77,7 @@ private:
   std::unordered_map<std::string, std::pair<unsigned, bool> > glbvar_bids;
 
   // temp state
-  CurrentDomain domain; // TODO UB in this domain is the ub before ite changes
+  CurrentDomain domain;
   Memory memory;
   std::set<smt::expr> undef_vars;
   std::array<StateValue, 32> tmp_values;
