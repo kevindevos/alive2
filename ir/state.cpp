@@ -258,7 +258,13 @@ void State::buildUB() {
   }
   // replace return domain with return_path && better ub
   return_domain.reset();
-  return_domain.add(return_path() && *get<1>(build_UB_data[&f.getFirstBB()]));
+  auto ret = return_path() && *get<1>(build_UB_data[&f.getFirstBB()]);
+  return_domain.add(ret);
+  
+  if (!has_noreturn) {
+    function_domain.reset();
+    function_domain.add(ret);
+  }
 }
 
 void State::addJump(const BasicBlock &dst0, expr &&cond) {
@@ -348,6 +354,7 @@ void State::addNoReturn() {
   return_undef_vars.insert(domain.undef_vars.begin(), domain.undef_vars.end());
   undef_vars.clear();
   addUB(expr(false));
+  has_noreturn = true;
 }
 
 const vector<StateValue>

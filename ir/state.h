@@ -128,6 +128,9 @@ private:
   // dominator tree
   std::unique_ptr<DomTree> dom_tree;
   std::unique_ptr<CFG> cfg;
+
+  // if false after SE, buildUB sets function_domain to return_domain
+  bool has_noreturn = false;
 public:
   State(Function &f, bool source);
 
