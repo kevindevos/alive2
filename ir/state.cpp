@@ -430,11 +430,7 @@ void State::addUB(AndExpr &&ubs) {
 }
 
 void State::addNoReturn() {
-  unordered_map<const BasicBlock*, TargetData> target_data;
-  buildTargetData(&target_data, *current_bb);
-  target_data[current_bb].ub = isolated_ub();
-  function_domain.reset();
-  function_domain.add(domain.path && buildUB(&target_data));
+  function_domain.add(domain());
   return_undef_vars.insert(undef_vars.begin(), undef_vars.end());
   return_undef_vars.insert(domain.undef_vars.begin(), domain.undef_vars.end());
   undef_vars.clear();
