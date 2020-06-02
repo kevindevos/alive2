@@ -303,9 +303,6 @@ void State::propagateNoRetBB(const BasicBlock &bb) {
     auto cur_bb = S.top();	
     S.pop();	
 
-    // TODO when coming from assume 0, last instr is not a jump, but an assume	
-    // which means this code is wrong and may not add the bb to no_ret_bbs properly	
-    // maybe add a flag to the parameters or dynamic cast to assume first before trying jump	
     auto jmp_instr = static_cast<JumpInstr*>(cur_bb->back());	
     if (jmp_instr->getTargetCount() == 1) {	
       no_ret_bbs.insert(cur_bb);	
