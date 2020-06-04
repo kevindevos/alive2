@@ -146,11 +146,13 @@ bool State::startBB(const BasicBlock &bb) {
   return domain;
 }
 
-bool State::canMoveExprsToDom(const BasicBlock &merge, const BasicBlock &dom) {
+expr State::getMoveExprsToDomCond(const BasicBlock &merge, 
+                                  const BasicBlock &dom) {
   unordered_map<const BasicBlock*, unordered_set<const BasicBlock*>> 
     bb_seen_targets;
   unordered_map<const BasicBlock*, bool> v;
   stack<const BasicBlock*> S;
+  AndExpr move_cond;
   S.push(&merge);
   auto cur_bb = &merge;
 
@@ -180,17 +182,18 @@ bool State::canMoveExprsToDom(const BasicBlock &merge, const BasicBlock &dom) {
     if (seen_targets.size() != tgt_count) {
       // If condition fails double check to exclude bb's with unreachable
       // from counting
-      auto tgts = jmp_instr->targets();
-      for (auto I = tgts.begin(), E = tgts.end(); I != E; ++I) {
-        // if target has no UB, then it was ignored in buildUB and thus here too
-        if (no_ret_bbs.find(&(*I)) != no_ret_bbs.end())
+      for (auto &[target, tgt_data] : global_target_data[bb].dsts) {
+        (void)tgt_data;
+        if (no_ret_bbs.find(target) != no_ret_bbs.end())
           --tgt_count;
+        else {
+          if (seen_targets.find(target) == seen_targets.end())
+            move_cond.add(!get<0>(predecessor_data[target][bb]).path());
+        }
       }
-      if (seen_targets.size() != tgt_count)
-        return false;
     }
   }
-  return true;
+  return move_cond();
 }
 
 // Fill a map with target data for a subset of nodes of the CFG starting from
@@ -277,10 +280,11 @@ expr State::buildUB(unordered_map<const BasicBlock*, TargetData> *tdata) {
             }
 
             auto &dom = *dom_tree->getIDominator(*cur_bb);
-            if (canMoveExprsToDom(*cur_bb, dom)) {
-              build_ub_data[&dom].carry_ub = move(ub);
-              ub = true;
-            }
+            auto move_cond = getMoveExprsToDomCond(*cur_bb, dom);
+            auto &dom_carry = build_ub_data[&dom].carry_ub;
+            auto e = expr::mkIf(move_cond, *ub, true);
+            dom_carry = dom_carry ? e && *dom_carry : e;
+            ub = true;
           }
         }
       }

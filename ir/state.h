@@ -149,7 +149,8 @@ public:
   bool isUndef(const smt::expr &e) const;
 
   bool startBB(const BasicBlock &bb);
-  bool canMoveExprsToDom(const BasicBlock &merge, const BasicBlock &dom);
+  smt::expr getMoveExprsToDomCond(const BasicBlock &merge, 
+                                  const BasicBlock &dom);
   
   void buildTargetData(std::unordered_map<const BasicBlock*, State::TargetData> 
                        *tdata, const BasicBlock &end);
