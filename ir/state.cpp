@@ -146,17 +146,63 @@ bool State::startBB(const BasicBlock &bb) {
   return domain;
 }
 
+// build a formula for the paths reaching the set of bb's in bbs and not
+// reaching the merge
+expr State::buildPathFromDomForBBs(const BasicBlock &merge, const BasicBlock
+                                   &dom,
+                                   unordered_set<const BasicBlock*> *bbs) {
+  // bb -> <visited, path>
+  unordered_map<const BasicBlock*, pair<bool, optional<expr>>> build_path_data;
+  stack<const BasicBlock*> S;
+  build_path_data[&merge].second = false;
+  S.push(&dom);
+
+  while (!S.empty()) {
+    auto cur_bb = S.top();
+    S.pop();
+    auto &[visited, path] = build_path_data[cur_bb];
+
+    if (!visited) {
+      visited = true;
+
+      if (cur_bb == &merge)
+        continue;
+
+      if (bbs->find(cur_bb) == bbs->end()) {
+        S.push(cur_bb);
+        for (auto &[tgt_bb, cond] : global_target_data[cur_bb].dsts) {
+          (void)cond;
+          S.push(tgt_bb);
+        }
+      } else {
+        build_path_data[cur_bb].second = true;
+      }
+    } else {
+      if (path)
+        continue;
+      path = false;
+      
+      for (auto &[tgt_bb, cond] : global_target_data[cur_bb].dsts) {
+        auto &tgt_path = build_path_data[tgt_bb].second;
+        if (tgt_path)
+          path = *path || (cond && *tgt_path);
+      }
+    }
+  }
+  return *build_path_data[&dom].second;
+}
+
 expr State::getMoveExprsToDomCond(const BasicBlock &merge, 
                                   const BasicBlock &dom) {
   unordered_map<const BasicBlock*, unordered_set<const BasicBlock*>> 
     bb_seen_targets;
   unordered_map<const BasicBlock*, bool> v;
   stack<const BasicBlock*> S;
-  AndExpr move_cond;
+  unordered_set<const BasicBlock*> break_postdom_bbs;
   S.push(&merge);
   auto cur_bb = &merge;
 
-  while(!S.empty()) {
+  while (!S.empty()) {
     cur_bb = S.top();
     S.pop();
     auto &visited = v[cur_bb];
@@ -188,12 +234,12 @@ expr State::getMoveExprsToDomCond(const BasicBlock &merge,
           --tgt_count;
         else {
           if (seen_targets.find(target) == seen_targets.end())
-            move_cond.add(!get<0>(predecessor_data[target][bb]).path());
+            break_postdom_bbs.insert(target);
         }
       }
     }
   }
-  return move_cond();
+  return !buildPathFromDomForBBs(merge, dom, &break_postdom_bbs);
 }
 
 // Fill a map with target data for a subset of nodes of the CFG starting from

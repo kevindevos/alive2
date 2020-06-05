@@ -149,6 +149,9 @@ public:
   bool isUndef(const smt::expr &e) const;
 
   bool startBB(const BasicBlock &bb);
+  smt::expr buildPathFromDomForBBs(const BasicBlock &merge, const BasicBlock  
+                                   &dom, std::unordered_set<const BasicBlock*> 
+                                   *bbs);
   smt::expr getMoveExprsToDomCond(const BasicBlock &merge, 
                                   const BasicBlock &dom);
   
