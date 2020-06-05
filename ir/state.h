@@ -117,6 +117,7 @@ private:
   struct TargetData {
     std::vector<std::pair<const BasicBlock*, smt::expr>> dsts;
     std::optional<smt::expr> ub;
+    bool has_return;
   };
   std::unordered_map<const BasicBlock*, TargetData> global_target_data;
   
@@ -136,6 +137,8 @@ private:
   // either they reach unreachable or a jump instruction with only back-edges	
   std::unordered_set<const BasicBlock*> no_ret_bbs;	
   std::unordered_map<const BasicBlock*,unsigned> back_edge_counter;
+
+  unsigned num_returns = 0;
 public:
   State(Function &f, bool source);
 

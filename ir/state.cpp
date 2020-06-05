@@ -325,10 +325,19 @@ expr State::buildUB(unordered_map<const BasicBlock*, TargetData> *tdata) {
               dom_tree = make_unique<DomTree>(f, *cfg);
             }
 
-            auto &dom = *dom_tree->getIDominator(*cur_bb);
-            auto move_cond = getMoveExprsToDomCond(*cur_bb, dom);
-            auto &dom_carry = build_ub_data[&dom].carry_ub;
-            auto e = expr::mkIf(move_cond, *ub, true);
+            
+            expr move_cond;
+            const BasicBlock *dom = nullptr;
+            // if return and is single one then move_cond is trivially true
+            if (cur_data.has_return && num_returns == 1) {
+              move_cond = true;
+              dom = &f.getFirstBB();
+            } else {
+              dom = dom_tree->getIDominator(*cur_bb);
+              move_cond = getMoveExprsToDomCond(*cur_bb, *dom);
+            }
+            auto &dom_carry = build_ub_data[dom].carry_ub;
+            auto e = !move_cond || *ub;
             dom_carry = dom_carry ? e && *dom_carry : e;
             ub = true;
           }
@@ -444,7 +453,9 @@ void State::addCondJump(const expr &cond, const BasicBlock &dst_true,
 }
 
 void State::addReturn(const StateValue &val) {
-  global_target_data[current_bb].ub = isolated_ub();
+  auto cur_bb_tgt_data = &global_target_data[current_bb];
+  cur_bb_tgt_data->ub = isolated_ub();
+  cur_bb_tgt_data->has_return = true;
   return_val.add(val, domain.path);
   return_memory.add(memory, domain.path);
   return_domain.add(domain());
@@ -454,6 +465,7 @@ void State::addReturn(const StateValue &val) {
   return_undef_vars.insert(domain.undef_vars.begin(), domain.undef_vars.end());
   undef_vars.clear();
   addUB(expr(false));
+  ++num_returns;
 }
 
 void State::addUB(expr &&ub) {
