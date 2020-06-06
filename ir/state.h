@@ -118,6 +118,7 @@ private:
     std::vector<std::pair<const BasicBlock*, smt::expr>> dsts;
     std::optional<smt::expr> ub;
     bool has_return;
+    unsigned ub_estimated_size;
   };
   std::unordered_map<const BasicBlock*, TargetData> global_target_data;
   
@@ -126,6 +127,7 @@ private:
     bool visited;
     std::optional<smt::expr> ub;
     std::optional<smt::expr> carry_ub;
+    unsigned ub_estimated_size = 0;
   };
   // dominator tree
   std::unique_ptr<DomTree> dom_tree;

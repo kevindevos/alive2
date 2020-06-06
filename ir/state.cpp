@@ -284,7 +284,7 @@ expr State::buildUB(unordered_map<const BasicBlock*, TargetData> *tdata) {
     auto cur_bb = S.top();
     S.pop();
 
-    auto &[visited, ub, carry_ub] = build_ub_data[cur_bb];
+    auto &[visited, ub, carry_ub, ub_size] = build_ub_data[cur_bb];
     if (!visited) {
       visited = true;
       S.push(cur_bb);
@@ -295,6 +295,8 @@ expr State::buildUB(unordered_map<const BasicBlock*, TargetData> *tdata) {
         (void)cond;
         S.push(tgt_bb);
       }
+      if (cur_data.dsts.empty()) 
+        ub_size = cur_data.ub_estimated_size;
     } else {
       if (!ub) {
         auto &cur_data = (*tdata)[cur_bb];
@@ -305,9 +307,11 @@ expr State::buildUB(unordered_map<const BasicBlock*, TargetData> *tdata) {
         
         // build ub for targets
         for (auto &[tgt_bb, cond] : cur_data.dsts) {
-          auto &tgt_ub = build_ub_data[tgt_bb].ub;
-          if (tgt_ub)
-            ub = ub ? expr::mkIf(cond, *tgt_ub, *ub) : tgt_ub;
+          auto &tgt_data = build_ub_data[tgt_bb];
+          if (tgt_data.ub) {
+            ub = ub ? expr::mkIf(cond, *tgt_data.ub, *ub) : tgt_data.ub;
+            ub_size += tgt_data.ub_estimated_size;
+          }
         }
         
         // only add current ub if at least one target has set ub
@@ -425,6 +429,7 @@ void State::addJump(const BasicBlock &dst0, expr &&cond) {
     auto &tgt_data = global_target_data[current_bb];
     tgt_data.dsts.emplace_back(dst, *c);
     tgt_data.ub = isolated_ub();
+    tgt_data.ub_estimated_size = isolated_ub.size();
   }
 
   cond &= domain.path;
@@ -456,6 +461,7 @@ void State::addReturn(const StateValue &val) {
   auto cur_bb_tgt_data = &global_target_data[current_bb];
   cur_bb_tgt_data->ub = isolated_ub();
   cur_bb_tgt_data->has_return = true;
+  cur_bb_tgt_data->ub_estimated_size = isolated_ub.size();
   return_val.add(val, domain.path);
   return_memory.add(memory, domain.path);
   return_domain.add(domain());
