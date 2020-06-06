@@ -315,6 +315,7 @@ expr State::buildUB(unordered_map<const BasicBlock*, TargetData> *tdata) {
             ub_size += tgt_data.ub_estimated_size;
           }
         }
+        ub_size += cur_data.ub_estimated_size; // TODO add to commit forgot this
         
         // only add current ub if at least one target has set ub
         if (ub || cur_data.dsts.empty()) {
