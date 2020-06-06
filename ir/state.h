@@ -119,6 +119,7 @@ private:
     std::optional<smt::expr> ub;
     bool has_return;
     unsigned ub_estimated_size;
+    unsigned path_estimated_size;
   };
   std::unordered_map<const BasicBlock*, TargetData> global_target_data;
   

@@ -117,8 +117,10 @@ bool State::startBB(const BasicBlock &bb) {
   domain.reset();
   isolated_ub.reset();
 
-  if (&f.getFirstBB() == &bb)
+  if (&f.getFirstBB() == &bb) {
+    global_target_data[&bb].path_estimated_size = 0;
     return true;
+  }
 
   auto I = predecessor_data.find(&bb);
   if (I == predecessor_data.end())
@@ -426,10 +428,11 @@ void State::addJump(const BasicBlock &dst0, expr &&cond) {
 
   // ignore #sink or back edges when building UB
   if (dst == &dst0) {
-    auto &tgt_data = global_target_data[current_bb];
-    tgt_data.dsts.emplace_back(dst, *c);
-    tgt_data.ub = isolated_ub();
-    tgt_data.ub_estimated_size = isolated_ub.size();
+    auto &tdata = global_target_data[current_bb];
+    tdata.dsts.emplace_back(dst, *c);
+    tdata.ub = isolated_ub();
+    tdata.ub_estimated_size = isolated_ub.size();
+    global_target_data[dst].path_estimated_size = tdata.path_estimated_size + 1;
   }
 
   cond &= domain.path;
