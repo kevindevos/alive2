@@ -158,9 +158,9 @@ public:
   smt::expr buildPathFromDomForBBs(const BasicBlock &merge, const BasicBlock  
                                    &dom, std::unordered_set<const BasicBlock*> 
                                    *bbs);
-  smt::expr getMoveExprsToDomCond(const BasicBlock &merge, 
-                                  const BasicBlock &dom);
-  
+  void buildPostdomBreakingBBs(const BasicBlock &merge, 
+                               const BasicBlock &dom, 
+                               std::unordered_set<const BasicBlock*> *pb_bbs);
   void buildTargetData(std::unordered_map<const BasicBlock*, State::TargetData> 
                        *tdata, const BasicBlock &end);
   smt::expr buildUB();

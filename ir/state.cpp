@@ -151,8 +151,8 @@ bool State::startBB(const BasicBlock &bb) {
 // build a formula for the paths reaching the set of bb's in bbs and not
 // reaching the merge
 expr State::buildPathFromDomForBBs(const BasicBlock &merge, const BasicBlock
-                                   &dom,
-                                   unordered_set<const BasicBlock*> *bbs) {
+                                   &dom, unordered_set<const BasicBlock*>
+                                   *bbs) {
   // bb -> <visited, path>
   unordered_map<const BasicBlock*, pair<bool, optional<expr>>> build_path_data;
   stack<const BasicBlock*> S;
@@ -194,13 +194,13 @@ expr State::buildPathFromDomForBBs(const BasicBlock &merge, const BasicBlock
   return *build_path_data[&dom].second;
 }
 
-expr State::getMoveExprsToDomCond(const BasicBlock &merge, 
-                                  const BasicBlock &dom) {
+void State::buildPostdomBreakingBBs(const BasicBlock &merge, 
+                                    const BasicBlock &dom, 
+                                    unordered_set<const BasicBlock*> *pb_bbs) {
   unordered_map<const BasicBlock*, unordered_set<const BasicBlock*>> 
     bb_seen_targets;
   unordered_map<const BasicBlock*, bool> v;
   stack<const BasicBlock*> S;
-  unordered_set<const BasicBlock*> break_postdom_bbs;
   S.push(&merge);
   auto cur_bb = &merge;
 
@@ -236,12 +236,11 @@ expr State::getMoveExprsToDomCond(const BasicBlock &merge,
           --tgt_count;
         else {
           if (seen_targets.find(target) == seen_targets.end())
-            break_postdom_bbs.insert(target);
+            pb_bbs->insert(target);
         }
       }
     }
   }
-  return !buildPathFromDomForBBs(merge, dom, &break_postdom_bbs);
 }
 
 // Fill a map with target data for a subset of nodes of the CFG starting from
@@ -315,7 +314,7 @@ expr State::buildUB(unordered_map<const BasicBlock*, TargetData> *tdata) {
             ub_size += tgt_data.ub_estimated_size;
           }
         }
-        ub_size += cur_data.ub_estimated_size; // TODO add to commit forgot this
+        ub_size += cur_data.ub_estimated_size;
         
         // only add current ub if at least one target has set ub
         if (ub || cur_data.dsts.empty()) {
@@ -332,7 +331,6 @@ expr State::buildUB(unordered_map<const BasicBlock*, TargetData> *tdata) {
               dom_tree = make_unique<DomTree>(f, *cfg);
             }
 
-            
             expr move_cond;
             const BasicBlock *dom = nullptr;
             // if return and is single one then move_cond is trivially true
@@ -341,7 +339,27 @@ expr State::buildUB(unordered_map<const BasicBlock*, TargetData> *tdata) {
               dom = &f.getFirstBB();
             } else {
               dom = dom_tree->getIDominator(*cur_bb);
-              move_cond = getMoveExprsToDomCond(*cur_bb, *dom);
+              unordered_set<const BasicBlock*> pb_bbs;
+              buildPostdomBreakingBBs(*cur_bb, *dom, &pb_bbs);
+              if (pb_bbs.empty()) {
+                move_cond = true;
+              } else {
+                // estimate path cost for calculating the heuristic
+                unsigned cost = 0;
+                for (auto &bb : pb_bbs) 
+                  cost += global_target_data[bb].path_estimated_size;
+                if (cost) {
+                  auto &dom_size = global_target_data[dom].path_estimated_size;
+                  cost -= dom_size * pb_bbs.size();
+                }
+                cost = cost * cost;
+
+                // if duplicating path cost is estimated to be superior to 
+                // duplicating ub, then do not move the merge ub to its dom
+                if (cost > ub_size)
+                  continue;
+                move_cond = buildPathFromDomForBBs(*cur_bb, *dom, &pb_bbs);
+              }
             }
             auto &dom_carry = build_ub_data[dom].carry_ub;
             auto e = !move_cond || *ub;
