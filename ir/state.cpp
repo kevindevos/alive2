@@ -243,31 +243,6 @@ void State::buildPostdomBreakingBBs(const BasicBlock &merge,
   }
 }
 
-// Fill a map with target data for a subset of nodes of the CFG starting from
-// some specified BasicBlock
-void State::buildTargetData(unordered_map<const BasicBlock*, State::TargetData>
-                            *tdata, const BasicBlock &end) {
-  unordered_map<const BasicBlock*, bool> v;
-  stack<const BasicBlock*> S;
-  S.push(&end);
-
-  while (!S.empty()) {
-    auto cur_bb = S.top();
-    S.pop();
-
-    auto &visited = v[cur_bb];
-    if (visited)
-      continue;
-
-    for (auto &[pred, pred_data] : predecessor_data[cur_bb]) {
-      S.push(pred);
-      auto &p_tdata = (*tdata)[pred];
-      p_tdata.dsts.emplace_back(cur_bb, *get<2>(pred_data));
-      p_tdata.ub = global_target_data[pred].ub;
-    }
-  }
-}
-
 expr State::buildUB() {
   return buildUB(&global_target_data);
 }
