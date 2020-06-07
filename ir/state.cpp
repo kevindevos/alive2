@@ -358,7 +358,7 @@ expr State::buildUB(unordered_map<const BasicBlock*, TargetData> *tdata) {
                 // duplicating ub, then do not move the merge ub to its dom
                 if (cost > ub_size)
                   continue;
-                move_cond = buildPathFromDomForBBs(*cur_bb, *dom, &pb_bbs);
+                move_cond = !buildPathFromDomForBBs(*cur_bb, *dom, &pb_bbs);
               }
             }
             auto &dom_carry = build_ub_data[dom].carry_ub;
