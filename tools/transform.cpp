@@ -16,6 +16,7 @@
 #include <map>
 #include <set>
 #include <sstream>
+#include <stack>
 
 using namespace IR;
 using namespace smt;
@@ -1035,6 +1036,59 @@ void Transform::preprocess() {
 
       changed |= fn->removeUnusedStuff(users);
     } while (changed);
+  }
+
+  // remove BBs not reachable from entry
+  for (auto fn : { &src, &tgt }) {
+    unordered_map<const BasicBlock*, bool> visited;
+    vector<const BasicBlock*> visited_bbs;
+    auto &entry = fn->getFirstBB();
+    visited_bbs.push_back(&entry);
+
+    // DFS to find reachable BBs
+    unsigned size = visited_bbs.size();
+    for (unsigned i = 0; i < size; ++i) {
+      auto &bb = visited_bbs[i];
+      auto &vis = visited[bb];
+      if (vis)
+        continue;
+      vis = true;
+      
+      if (auto instr = dynamic_cast<const JumpInstr*>(&bb->back())) {
+        auto tgt_it = const_cast<JumpInstr*>(instr)->targets();
+        for (auto I = tgt_it.begin(), E = tgt_it.end(); I != E; ++I) {
+          visited_bbs.push_back(&(*I));
+          ++size;
+        }
+      }
+    }
+    
+    // check if any bb was not reached before finding them
+    vector<BasicBlock*> to_remove;
+    if (visited.size() != fn->getBBs().size()) {
+      for (auto bb : fn->getBBs()) {
+        if (!visited[bb]) {
+          // remove bb from phi instrs in its sucessors
+          if (auto instr = dynamic_cast<JumpInstr*>(&bb->back())) {
+            auto tgt_it = instr->targets();
+            for (auto I = tgt_it.begin(), E = tgt_it.end(); I != E; ++I) {
+              for (auto &instr : (*I).instrs()) {
+                if (auto phi = dynamic_cast<const Phi*>(&instr))
+                  const_cast<Phi&>(*phi).removeValue(bb->getName());
+                else
+                  break;
+              }
+            }
+          }
+          // delay removal until all phi's were processed
+          to_remove.push_back(bb);
+        }
+      }
+      // remove unreachable blocks
+      for (auto bb : to_remove) {
+        fn->removeBB(*bb);
+      }
+    }
   }
 }
 
