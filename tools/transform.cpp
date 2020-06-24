@@ -16,7 +16,6 @@
 #include <map>
 #include <set>
 #include <sstream>
-#include <stack>
 
 using namespace IR;
 using namespace smt;
