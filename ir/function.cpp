@@ -347,6 +347,7 @@ void CFG::printDot(ostream &os) const {
 void LoopTree::buildLoopTree() {
   enum LHeaderType { nonheader = 0, self = 1, reducible = 2, irreducible = 3 };
   struct NodeData {
+    vector<unsigned> preds; // either back or non_back preds
     vector<unsigned> non_back_preds;
     vector<unsigned> back_preds;
     unsigned header;
@@ -358,7 +359,9 @@ void LoopTree::buildLoopTree() {
   vector<unsigned> last;
   vector<NodeData> node_data;
   unordered_map<const BasicBlock*, unsigned> bb_map;
-  stack<const BasicBlock*> work_list;
+  
+  // source -> target
+  stack<pair<unsigned, const BasicBlock*>> work_list;
   
   auto bb_num = [&](const BasicBlock *bb) {
     auto [I, inserted] = bb_map.emplace(bb, nodes.size());
@@ -407,13 +410,16 @@ void LoopTree::buildLoopTree() {
   };
   
   // DFS to establish node ordering
-  work_list.push(&f.getFirstBB());
-  unsigned current = 0;
+  unsigned START_BB_ID = 0;
+  auto entry = &f.getFirstBB();
+  work_list.emplace(START_BB_ID, entry);
+  unsigned current = START_BB_ID;
   while (!work_list.empty()) {
-    auto current_bb = work_list.top();
+    auto &[source, current_bb] = work_list.top();
     work_list.pop();
     int n = bb_num(current_bb);
     nodes[current] = n;
+    node_data[n].preds.push_back(source);
     
     if (!number[n]) {
       number[n] = current++;
@@ -423,7 +429,7 @@ void LoopTree::buildLoopTree() {
         for (auto I = tgt_it.begin(), E = tgt_it.end(); I != E; ++I) {
           auto t_n = bb_num(&(*I));
           if (!number[t_n])
-            work_list.push(&(*I));
+            work_list.emplace(n, &(*I));
         }
       }
     } else {
