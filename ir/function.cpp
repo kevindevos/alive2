@@ -397,7 +397,9 @@ void LoopTree::buildLoopTree() {
     dfs_work_list.pop();
     int n = bb_num(current_bb);
     nodes[current] = n;
-    node_data[n].preds.push_back(source);
+    auto &cur_node_data = node_data[n];
+    cur_node_data.preds.push_back(source);
+    cur_node_data.bb = current_bb;
     
     if (!number[n]) {
       number[n] = current++;
