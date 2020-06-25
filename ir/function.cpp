@@ -353,6 +353,9 @@ void LoopTree::buildLoopTree() {
   // source -> target
   stack<pair<unsigned, const BasicBlock*>> dfs_work_list;
   
+  vector<Vecset*> vecsets;
+  vector<Vecset> vecsets_data;
+
   auto bb_num = [&](const BasicBlock *bb) {
     auto [I, inserted] = bb_map.emplace(bb, nodes.size());
     if (inserted) {
@@ -360,12 +363,11 @@ void LoopTree::buildLoopTree() {
       number.emplace_back();
       last.emplace_back();
       node_data.emplace_back();
+      vecsets.emplace_back();
+      vecsets_data.emplace_back();
     }
     return I->second;
   };
-
-  vector<Vecset*> vecsets;
-  vector<Vecset> vecsets_data;
   
   auto vecsetFind = [&](unsigned bb) {
     return vecsets[bb]->repr();
