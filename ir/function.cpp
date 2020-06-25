@@ -401,11 +401,11 @@ void LoopTree::buildLoopTree() {
   vector<Vecset*> vecsets;
   vector<Vecset> vecsets_data;
   
-  auto vecset_find = [&](unsigned bb) {
+  auto vecsetFind = [&](unsigned bb) {
     return *vecsets[bb];
   };
 
-  auto vecset_union = [&](unsigned from, unsigned to) {
+  auto vecsetUnion = [&](unsigned from, unsigned to) {
     auto from_set = vecsets[from];
     auto to_set = vecsets[to];
     for (auto &from_el : from_set->getAll()) {
@@ -414,6 +414,15 @@ void LoopTree::buildLoopTree() {
     }
     from_set->clear();
   };
+  // check ancestry by bb id
+  auto isAncestor = [&](unsigned a, unsigned b) {
+    auto &w = number[a];
+    auto &v = number[b];
+    return w <= v && v <= last[w];
+  };
+
+  // TODO ensure each node has a vecset of itself only at start
+  // TODO move stuff out of here into LoopTree as suited
 }
 
 
