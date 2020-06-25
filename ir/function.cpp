@@ -381,7 +381,7 @@ void LoopTree::buildLoopTree() {
       vector<unsigned> bb_set;
     public:
       Vecset() {}
-      int repr() { return bb_set.empty() ? -1 : bb_set[0]; }
+      unsigned repr() { return bb_set[0]; }
       const auto& getAll() { return bb_set; }
       void add(unsigned bb) { bb_set.push_back(bb); }
       void clear() { bb_set.clear(); }
