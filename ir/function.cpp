@@ -440,7 +440,9 @@ void LoopTree::buildLoopTree() {
   // b. distinguish between back edges and non back edges
   unsigned nodes_size = nodes.size();
   for (unsigned w = 0; w < nodes_size; ++w) {
-    auto &w_data = node_data[w]; 
+    auto &w_data = node_data[w];
+    node_data.header = START_BB_ID;
+    node_data.type = LHeaderType::nonheader;
     for (auto &v : w_data.preds) {
       if (isAncestor(w, v))
         w_data.back_preds.push_back(v);
