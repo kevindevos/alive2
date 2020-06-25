@@ -369,6 +369,7 @@ void LoopTree::buildLoopTree() {
       nodes.emplace_back();
       number.emplace_back();
       last.emplace_back();
+      node_data.emplace_back();
     }
     return I->second;
   };
