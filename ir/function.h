@@ -188,6 +188,15 @@ public:
   void printDot(std::ostream &os) const;
 };
 
+class LoopTree final {
+  Function &f;
+  CFG cfg;
+
+  void buildLoopTree();
+public:
+  LoopTree(Function &f, CFG &cfg) : f(f), cfg(cfg) { buildLoopTree(); }
+};
+
 class DomTree final {
     Function &f;
     CFG &cfg;

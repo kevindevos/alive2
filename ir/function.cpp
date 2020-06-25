@@ -4,6 +4,7 @@
 #include "ir/function.h"
 #include "ir/instr.h"
 #include "util/errors.h"
+#include <stack>
 
 using namespace smt;
 using namespace util;
@@ -338,6 +339,56 @@ void CFG::printDot(ostream &os) const {
   }
   os << "}\n";
 }
+
+// Build a tree of loop headers and their nested loop headers
+// Adaptation of the algorithm in the article
+// Havlak, Paul (1997).
+// Nesting of Reducible and Irreducible Loops.
+void LoopTree::buildLoopTree() {
+  // TODO change bb access by map to access by vector index
+  vector<const BasicBlock*> bbs; // just bbs
+  vector<unsigned> nodes; // nodes by dfs visit order
+  vector<unsigned> number; // ordering for a given node with dfs visit order idx
+  vector<unsigned> last; 
+  unordered_map<const BasicBlock*, unsigned> node_map;
+  stack<const BasicBlock*> work_list;
+
+  auto bb_num = [&](const BasicBlock *bb) {
+    auto [I, inserted] = node_map.emplace(bb, bbs.size());
+    if (inserted) {
+      bbs.emplace_back(bb);
+      nodes.emplace_back();
+      number.emplace_back();
+      last.emplace_back();
+    }
+    return I->second;
+  };
+  
+  // DFS to establish node ordering
+  work_list.push(&f.getFirstBB());
+  unsigned current = 1;
+  while (!work_list.empty()) {
+    auto current_bb = work_list.top();
+    work_list.pop();
+    int n = bb_num(current_bb);
+    nodes[current] = n;
+    
+    if (!number[n]) {
+      number[n] = current++;
+      if (auto instr = dynamic_cast<const JumpInstr*>(&current_bb->back())) {
+        auto tgt_it = const_cast<JumpInstr*>(instr)->targets();
+        for (auto I = tgt_it.begin(), E = tgt_it.end(); I != E; ++I) {
+          auto t_n = bb_num(&(*I));
+          if (!number[t_n])
+            work_list.push(&(*I));
+        }
+      }
+    } else {
+      last[number[n]] = current - 1;
+    }
+  }
+}
+
 
 
 // Relies on Alive's top_sort run during llvm2alive conversion in order to
