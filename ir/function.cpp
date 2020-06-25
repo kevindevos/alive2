@@ -345,6 +345,14 @@ void CFG::printDot(ostream &os) const {
 // Havlak, Paul (1997).
 // Nesting of Reducible and Irreducible Loops.
 void LoopTree::buildLoopTree() {
+  enum LHeaderType { nonheader = 0, self = 1, reducible = 2, irreducible = 3 };
+  struct NodeData {
+    vector<unsigned> non_back_preds;
+    vector<unsigned> back_preds;
+    unsigned header;
+    LHeaderType type;
+  };
+
   vector<unsigned> nodes; // nodes by DFS visit order
   vector<unsigned> number; // ordering for a given node with DFS visit order idx
   vector<unsigned> last; 
