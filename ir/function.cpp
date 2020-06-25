@@ -345,7 +345,9 @@ void CFG::printDot(ostream &os) const {
 // Havlak, Paul (1997).
 // Nesting of Reducible and Irreducible Loops.
 void LoopTree::buildLoopTree() {
-  enum LHeaderType { nonheader = 0, self = 1, reducible = 2, irreducible = 3 };
+  enum LHeaderType { 
+    none = 0, nonheader = 1, self = 2, reducible = 3, irreducible = 4 
+  };
   struct NodeData {
     vector<unsigned> preds; // either back or non_back preds
     vector<unsigned> non_back_preds;
@@ -361,7 +363,7 @@ void LoopTree::buildLoopTree() {
   unordered_map<const BasicBlock*, unsigned> bb_map;
   
   // source -> target
-  stack<pair<unsigned, const BasicBlock*>> work_list;
+  stack<pair<unsigned, const BasicBlock*>> dfs_work_list;
   
   auto bb_num = [&](const BasicBlock *bb) {
     auto [I, inserted] = bb_map.emplace(bb, nodes.size());
@@ -374,7 +376,7 @@ void LoopTree::buildLoopTree() {
     return I->second;
   };
 
-   // A vector disguised as a set that can be hidden and point to another
+  // A vector disguised as a set that can be hidden and point to another
   // vecset for convenient union operations
   struct Vecset {
     private:
@@ -412,11 +414,11 @@ void LoopTree::buildLoopTree() {
   // DFS to establish node ordering
   unsigned START_BB_ID = 0;
   auto entry = &f.getFirstBB();
-  work_list.emplace(START_BB_ID, entry);
+  dfs_work_list.emplace(START_BB_ID, entry);
   unsigned current = START_BB_ID;
-  while (!work_list.empty()) {
-    auto &[source, current_bb] = work_list.top();
-    work_list.pop();
+  while (!dfs_work_list.empty()) {
+    auto &[source, current_bb] = dfs_work_list.top();
+    dfs_work_list.pop();
     int n = bb_num(current_bb);
     nodes[current] = n;
     node_data[n].preds.push_back(source);
@@ -429,7 +431,7 @@ void LoopTree::buildLoopTree() {
         for (auto I = tgt_it.begin(), E = tgt_it.end(); I != E; ++I) {
           auto t_n = bb_num(&(*I));
           if (!number[t_n])
-            work_list.emplace(n, &(*I));
+            dfs_work_list.emplace(n, &(*I));
         }
       }
     } else {
@@ -441,8 +443,8 @@ void LoopTree::buildLoopTree() {
   unsigned nodes_size = nodes.size();
   for (unsigned w = 0; w < nodes_size; ++w) {
     auto &w_data = node_data[w];
-    node_data.header = START_BB_ID;
-    node_data.type = LHeaderType::nonheader;
+    w_data.header = START_BB_ID;
+    w_data.type = LHeaderType::nonheader;
     for (auto &v : w_data.preds) {
       if (isAncestor(w, v))
         w_data.back_preds.push_back(v);
@@ -451,9 +453,44 @@ void LoopTree::buildLoopTree() {
     }
   }
 
-  (void)vecsetFind;
-  (void)vecsetUnion;
-  // TODO ensure each node has a vecset of itself only at start
+  // c. d. e. core of the algorithm
+  node_data[0].header = LHeaderType::none;
+  unordered_set<unsigned> P;
+  stack<unsigned> work_list;
+  for (unsigned w = nodes_size - 1; w >= 0; --w) {
+    P.clear();
+    auto &w_data = node_data[w];
+    for (auto &v : w_data.back_preds) {
+      if (v != w) {
+        auto v_repr = vecsetFind(v);
+        P.insert(v_repr);
+        work_list.push(v_repr);
+      } else {
+        w_data.type = LHeaderType::self;
+      }
+    }
+    if (!P.empty())
+      w_data.type = LHeaderType::reducible;
+    while (!work_list.empty()) {
+      auto x = work_list.top();
+      work_list.pop();
+      for (auto &y : node_data[x].non_back_preds) {
+        unsigned y_ = vecsetFind(y);
+        if (!isAncestor(w, y_)) {
+          w_data.type = LHeaderType::irreducible;
+          w_data.non_back_preds.push_back(y_);
+        } else if (!P.count(y_) && y_ != w) {
+          P.insert(y_);
+          work_list.push(y_);
+        }
+      }
+    }
+    for (auto x : P) {
+      node_data[x].header = w;
+      vecsetUnion(x, w);
+    }
+  }
+  // TODO what do i really need from the algorithm for loop analysis?
   // TODO move stuff out of here into LoopTree as suited
 }
 
