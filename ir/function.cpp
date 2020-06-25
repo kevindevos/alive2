@@ -355,7 +355,8 @@ void LoopTree::buildLoopTree() {
 
   vector<unsigned> nodes; // nodes by DFS visit order
   vector<unsigned> number; // ordering for a given node with DFS visit order idx
-  vector<unsigned> last; 
+  vector<unsigned> last;
+  vector<NodeData> node_data;
   unordered_map<const BasicBlock*, unsigned> bb_map;
   stack<const BasicBlock*> work_list;
   
@@ -368,32 +369,8 @@ void LoopTree::buildLoopTree() {
     }
     return I->second;
   };
-  
-  // DFS to establish node ordering
-  work_list.push(&f.getFirstBB());
-  unsigned current = 0;
-  while (!work_list.empty()) {
-    auto current_bb = work_list.top();
-    work_list.pop();
-    int n = bb_num(current_bb);
-    nodes[current] = n;
-    
-    if (!number[n]) {
-      number[n] = current++;
-      if (auto instr = dynamic_cast<const JumpInstr*>(&current_bb->back())) {
-        auto tgt_it = const_cast<JumpInstr*>(instr)->targets();
-        for (auto I = tgt_it.begin(), E = tgt_it.end(); I != E; ++I) {
-          auto t_n = bb_num(&(*I));
-          if (!number[t_n])
-            work_list.push(&(*I));
-        }
-      }
-    } else {
-      last[number[n]] = current - 1;
-    }
-  }
 
-  // A vector disguised as a set that can be hidden and point to another
+   // A vector disguised as a set that can be hidden and point to another
   // vecset for convenient union operations
   struct Vecset {
     private:
@@ -428,7 +405,34 @@ void LoopTree::buildLoopTree() {
     auto &v = number[b];
     return w <= v && v <= last[w];
   };
+  
+  // DFS to establish node ordering
+  work_list.push(&f.getFirstBB());
+  unsigned current = 0;
+  while (!work_list.empty()) {
+    auto current_bb = work_list.top();
+    work_list.pop();
+    int n = bb_num(current_bb);
+    nodes[current] = n;
+    
+    if (!number[n]) {
+      number[n] = current++;
+      if (auto instr = dynamic_cast<const JumpInstr*>(&current_bb->back())) {
+        auto tgt_it = const_cast<JumpInstr*>(instr)->targets();
+        for (auto I = tgt_it.begin(), E = tgt_it.end(); I != E; ++I) {
+          auto t_n = bb_num(&(*I));
+          if (!number[t_n])
+            work_list.push(&(*I));
+        }
+      }
+    } else {
+      last[number[n]] = current - 1;
+    }
+  }
 
+  (void)vecsetFind;
+  (void)vecsetUnion;
+  (void)isAncestor;
   // TODO ensure each node has a vecset of itself only at start
   // TODO move stuff out of here into LoopTree as suited
 }
