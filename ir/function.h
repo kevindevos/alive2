@@ -192,6 +192,29 @@ class LoopTree final {
   Function &f;
   CFG cfg;
 
+  enum LHeaderType { 
+    none = 0, nonheader = 1, self = 2, reducible = 3, irreducible = 4 
+  };
+  struct NodeData {
+    std::vector<unsigned> preds; // either back or non_back preds
+    std::vector<unsigned> non_back_preds;
+    std::vector<unsigned> back_preds;
+    unsigned header;
+    LHeaderType type;
+  };
+
+  // A vector disguised as a set that can be hidden and point to another
+  // vecset for convenient union operations
+  struct Vecset {
+    private:
+      std::vector<unsigned> bb_set;
+    public:
+      Vecset() {}
+      unsigned repr() { return bb_set[0]; }
+      const auto& getAll() { return bb_set; }
+      void add(unsigned bb) { bb_set.push_back(bb); }
+      void clear() { bb_set.clear(); }
+  };
   void buildLoopTree();
 public:
   LoopTree(Function &f, CFG &cfg) : f(f), cfg(cfg) { buildLoopTree(); }
