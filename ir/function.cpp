@@ -391,7 +391,7 @@ void LoopTree::buildLoopTree() {
   vector<Vecset> vecsets_data;
   
   auto vecsetFind = [&](unsigned bb) {
-    return *vecsets[bb];
+    return vecsets[bb]->repr();
   };
 
   auto vecsetUnion = [&](unsigned from, unsigned to) {
