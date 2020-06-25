@@ -345,7 +345,6 @@ void CFG::printDot(ostream &os) const {
 // Havlak, Paul (1997).
 // Nesting of Reducible and Irreducible Loops.
 void LoopTree::buildLoopTree() {
-  // TODO change bb access by map to access by vector index
   vector<unsigned> nodes; // nodes by DFS visit order
   vector<unsigned> number; // ordering for a given node with DFS visit order idx
   vector<unsigned> last; 
@@ -353,7 +352,7 @@ void LoopTree::buildLoopTree() {
   stack<const BasicBlock*> work_list;
   
   auto bb_num = [&](const BasicBlock *bb) {
-    auto [I, inserted] = bb_map.emplace(bb, bbs.size());
+    auto [I, inserted] = bb_map.emplace(bb, nodes.size());
     if (inserted) {
       nodes.emplace_back();
       number.emplace_back();
@@ -385,6 +384,36 @@ void LoopTree::buildLoopTree() {
       last[number[n]] = current - 1;
     }
   }
+
+  // A vector disguised as a set that can be hidden and point to another
+  // vecset for convenient union operations
+  struct Vecset {
+    private:
+      vector<unsigned> bb_set;
+    public:
+      Vecset() {}
+      int repr() { return bb_set.empty() ? -1 : bb_set[0]; }
+      const auto& getAll() { return bb_set; }
+      void add(unsigned bb) { bb_set.push_back(bb); }
+      void clear() { bb_set.clear(); }
+  };
+  
+  vector<Vecset*> vecsets;
+  vector<Vecset> vecsets_data;
+  
+  auto vecset_find = [&](unsigned bb) {
+    return *vecsets[bb];
+  };
+
+  auto vecset_union = [&](unsigned from, unsigned to) {
+    auto from_set = vecsets[from];
+    auto to_set = vecsets[to];
+    for (auto &from_el : from_set->getAll()) {
+      to_set->add(from_el);
+      vecsets[from_el] = to_set;
+    }
+    from_set->clear();
+  };
 }
 
 
