@@ -4,6 +4,8 @@
 #include "ir/function.h"
 #include "ir/instr.h"
 #include "util/errors.h"
+#include <stack>
+#include <iostream>
 
 using namespace smt;
 using namespace util;
@@ -339,6 +341,368 @@ void CFG::printDot(ostream &os) const {
   os << "}\n";
 }
 
+// Get the representative of the set that presently contains basicblock bb
+unsigned LoopTree::vecsetFind(unsigned bb) {
+  return vecsets[bb]->repr();
+}
+
+// Move all elements in from set into to set, and clear from set
+void LoopTree::vecsetUnion(unsigned from, unsigned to) {
+  auto from_set = vecsets[from];
+  auto to_set = vecsets[to];
+  for (auto from_el : from_set->getAll()) {
+    to_set->add(from_el);
+    vecsets[from_el] = to_set;
+  }
+  from_set->clear();
+}
+
+// Build a tree of loop headers and their nested loop headers
+// Adaptation of the algorithm in the article
+// Havlak, Paul (1997).
+// Nesting of Reducible and Irreducible Loops.
+void LoopTree::buildLoopTree() {
+  vector<bool> visited; // bb id -> visited
+  
+  // used in DFS to override sucessor list of a bb when fix_loops added new bbs
+  unordered_map<const BasicBlock*, vector<const BasicBlock*>> succ_override;
+  
+  // reserve more than total number of blocks to prevent necessary
+  // reallocation when adding new bbs in procedure fix_loops
+  vecsets_data.reserve(2*f.getBBs().size());
+
+  auto bb_id = [&](const BasicBlock *bb) {
+    auto [I, inserted] = bb_map.emplace(bb, node_data.size());
+    if (inserted) {
+      nodes.emplace_back();
+      number.emplace_back();
+      last.emplace_back();
+      node_data.emplace_back();
+      vecsets.emplace_back();
+      vecsets_data.emplace_back();
+      visited.emplace_back();
+    }
+    return I->second;
+  };
+  
+  // check if bb with preorder w is an ancestor of bb with preorder v
+  auto isAncestor = [&](unsigned w, unsigned v) {
+    return w <= v && v <= last[w];
+  };
+  
+  // DFS to establish node ordering
+  auto DFS = [&]() {
+    stack<const BasicBlock*> dfs_work_list;
+
+    unsigned START_BB_ID = 0;
+    auto entry = &f.getFirstBB();
+    dfs_work_list.push(entry);
+    unsigned current = START_BB_ID;
+
+    auto try_push_worklist = [&](const BasicBlock *bb, unsigned pred) {
+      auto t_n = bb_id(bb);
+      if (!visited[t_n])
+        dfs_work_list.push(bb);
+      node_data[t_n].preds.push_back(pred);
+      node_data[pred].succs.push_back(t_n);
+    };
+
+    while (!dfs_work_list.empty()) {
+      auto cur_bb = dfs_work_list.top();
+      dfs_work_list.pop();
+      int n = bb_id(cur_bb);
+      nodes[current] = n;
+      auto &cur_node_data = node_data[n];
+      cur_node_data.bb = cur_bb;
+      
+      if (!visited[n]) {
+        visited[n] = true;
+        number[n] = current++;
+        vecsets_data[n] = Vecset(n);
+        vecsets[n] = &vecsets_data[n];
+        dfs_work_list.push(cur_bb);
+
+        // add sucessors to work_list if not visited
+        auto &succ_overr = succ_override[cur_bb];
+        if (succ_overr.empty()) {
+          if (auto instr = dynamic_cast<const JumpInstr*>(&cur_bb->back())) {
+            auto tgt_it = const_cast<JumpInstr*>(instr)->targets();
+            for (auto I = tgt_it.begin(), E = tgt_it.end(); I != E; ++I)
+              try_push_worklist(&(*I), n);
+          }
+        } else {
+          // if new bbs were added from fix_loops, use succ_overr instead
+          for (auto succ : succ_overr)
+            try_push_worklist(succ, n);
+        }
+      } else {
+        last[number[n]] = current - 1;
+      }
+    }
+  };
+
+  // Run DFS to build preorder numbering and the vecsets for analyze_loops
+  DFS();
+
+  // fix_loops procedure: adds pseudo-bbs where needed in order to go around
+  // the limitation of not being able to assign multiple header types to the 
+  // same loop header
+  for (unsigned w_num = 0; w_num < nodes.size(); ++w_num) {
+    auto &w = nodes[w_num];
+    auto &w_data = node_data[w];
+    for (auto &v : w_data.preds) {
+      if (w_num <= number[v]) 
+        w_data.red_back_in.push_back(v);
+      else
+        w_data.other_in.push_back(v);
+    }
+    if (!w_data.red_back_in.empty() && w_data.other_in.size() > 1) {
+      auto &new_bb = new_bbs.emplace_back("#loop_"+w_data.bb->getName());
+      succ_override[&new_bb].push_back(w_data.bb); // w' -> w
+      
+      // for each predecessor of w, make them point to new bb instead
+      for (auto &v : w_data.other_in) {
+        auto v_bb = node_data[v].bb;
+        auto &v_sucessors = succ_override[v_bb];
+
+        // copy old sucessors except w
+        if (auto instr = dynamic_cast<const JumpInstr*>(&v_bb->back())) {
+          auto tgt_it = const_cast<JumpInstr*>(instr)->targets();
+          for (auto I = tgt_it.begin(), E = tgt_it.end(); I != E; ++I) {
+            auto t_bb = &(*I);
+            if (t_bb != w_data.bb)
+              v_sucessors.push_back(t_bb);
+          }
+        }
+        // add w' as sucessor to bb v instead of w
+        v_sucessors.push_back(&new_bb);
+      }
+    }
+  }
+
+  // if new bbs were created in fix_loops, rerun DFS for updated preorder
+  // numbering
+  if (!new_bbs.empty()) {
+    visited.clear();
+    bb_map.clear();
+    node_data.clear();
+    vecsets.clear();
+    vecsets_data.clear();
+    DFS();
+  }
+
+  for (auto &n_bb : new_bbs)
+    node_data[bb_map[&n_bb]].is_new = true;
+
+  // analyze_loops
+  // b. distinguish between back edges and non back edges
+  unsigned nodes_size = nodes.size();
+  for (unsigned w_num = 0; w_num < nodes_size; ++w_num) {
+    auto &w = nodes[w_num];
+    auto &w_data = node_data[w];
+    w_data.header = 0;
+    w_data.type = LHeaderType::nonheader;
+    for (auto &v : w_data.preds) {
+      if (isAncestor(w_num, number[v]))
+        w_data.back_preds.push_back(v);
+      else
+        w_data.non_back_preds.push_back(v);
+    }
+  }
+
+  // c. d. e. 
+  // for each node with incoming reducible backedge, builds a set of bbs
+  // that represents the loop, sets the loop header and type
+  loop_data.resize(nodes_size);
+  node_data[0].header = 0;
+  unordered_set<unsigned> P;
+  stack<unsigned> work_list;
+  vector<unsigned> loops_with_new_bb;
+  for (unsigned w_num = nodes_size - 1; ; --w_num) {
+    auto &w = nodes[w_num];
+    P.clear();
+    auto &w_data = node_data[w];
+    for (auto &v : w_data.back_preds) {
+      if (v != w) {
+        auto v_repr = vecsetFind(v);
+        P.insert(v_repr);
+        work_list.push(v_repr);
+      } else {
+        w_data.type = LHeaderType::self;
+      }
+    }
+    if (!P.empty())
+      w_data.type = LHeaderType::reducible;
+    while (!work_list.empty()) {
+      auto x = work_list.top();
+      work_list.pop();
+      for (auto &y : node_data[x].non_back_preds) {
+        unsigned y_ = vecsetFind(y);
+        if (!isAncestor(w_num, number[y_])) {
+          w_data.type = LHeaderType::irreducible;
+          w_data.non_back_preds.push_back(y_);
+        } else if (y_ != w) {
+          if (P.insert(y_).second)
+            work_list.push(y_);
+        }
+      }
+    }
+    if (!P.empty()) {
+      for (auto x : P) {
+        node_data[x].header = w;
+        vecsetUnion(x, w);
+      }
+      if (node_data[w].is_new)
+        loops_with_new_bb.push_back(w);
+      loop_data[node_data[w].header].child_loops.push_back(w);
+
+      auto &w_loop_data = loop_data[w];
+      bool has_out_exit, has_out_entry, has_in_entry, has_in_exit;
+      for (auto lnode : vecsets[w]->getAll()) {
+        w_loop_data.nodes.push_back(lnode);
+        has_out_exit = has_out_entry = has_in_entry = has_in_exit = false;
+        if (lnode != w && loop_data[lnode].nodes.empty()) {
+          auto &lnode_data = node_data[lnode];
+          // check predecessors
+          for (auto pred : lnode_data.preds) {
+            if (vecsetFind(pred) != w)
+              has_out_entry = true; // (pred, lnode) : x not in loop 
+            else
+              has_in_entry = true; // (pred, lnode) : x in loop
+          }
+          // check sucessors
+          for (auto succ : lnode_data.succs) {
+            if (vecsetFind(succ) != w)
+              has_out_exit = true; // (lnode, x) : x not in loop 
+            else
+              has_in_exit = true; // (lnode, x) : x in loop
+          }
+
+          // check if it is a valid loop header
+          // unrolling an invalid header would give no benefit
+          if (has_out_exit && has_out_entry && has_in_entry && has_in_exit) {
+            w_loop_data.alternate_headers.push_back(lnode);
+            auto &alt_data = node_data[lnode];
+            alt_data.header = w_data.header;
+            alt_data.type = w_data.type;
+          }
+        }
+      }
+      loop_header_ids.push_back(w);
+    }
+    if (!w_num)
+      break;
+  }
+
+  // update header for loops with a new bb inserted in fix_loops
+  for (auto w : loops_with_new_bb) {
+    auto &w_loop_data = loop_data[w];
+    if (!w_loop_data.alternate_headers.empty()) {
+      auto &new_w = w_loop_data.alternate_headers.front();
+      auto &new_w_loop_data = loop_data[new_w];
+      for (int i = w_loop_data.nodes.size() - 1; i >= 0; --i) {
+        auto &node = w_loop_data.nodes[i];
+        node_data[node].header = new_w;
+        if (node != w)
+          new_w_loop_data.nodes.push_back(node);
+        w_loop_data.nodes.erase(w_loop_data.nodes.end());
+      }
+      // update pointers for loop nesting tree after header swap
+      for (int i = w_loop_data.child_loops.size() - 1; i >= 0; --i) {
+        new_w_loop_data.child_loops.push_back(w_loop_data.child_loops[i]);
+        w_loop_data.child_loops.erase(w_loop_data.child_loops.end());
+      }
+      auto &hdr_hdr = loop_data[node_data[w].header];
+      auto siz = hdr_hdr.child_loops.size();
+      for (unsigned i = 0; i < siz; ++i) {
+        auto &cl = hdr_hdr.child_loops[i];
+        if (cl == w)
+          cl = new_w;
+      }
+    }
+  }
+  
+}
+
+void LoopTree::printDot(std::ostream &os) const {
+  os << "digraph {\n";
+  
+  vector<string> lheader_names {
+    "none", "nonheader", "self", "reducible", "irreducible"
+  };
+
+  // temporary print loop sets
+  for (auto &n : loop_header_ids) {
+    auto &n_loop_data = loop_data[n];
+    auto &n_data = node_data[n];
+    auto bb = n;
+    if (n_data.is_new)
+      bb = n_loop_data.alternate_headers.front();
+
+    cout << bb_dot_name(node_data[bb].bb->getName()) << " -> (";
+    for (auto el : n_loop_data.nodes) {
+      cout << bb_dot_name(node_data[el].bb->getName());
+      if (el != loop_data[n].nodes.back())
+        cout << ",";
+    }
+    cout << ")" << '\n';
+  }
+
+  for (auto n : nodes) {
+    auto &node = node_data[n];
+    auto &node_loop_data = loop_data[n];
+    if (node.is_new && !node_loop_data.alternate_headers.empty()) continue;
+    auto header_id = node.header;
+    auto &header_loop_data = loop_data[node.header];
+    if (!header_loop_data.alternate_headers.empty())
+      header_id = header_loop_data.alternate_headers.front();
+    auto header_bb = node_data[header_id].bb;
+
+    if (header_bb == &f.getFirstBB() && node.bb == header_bb)
+      continue;
+    auto shape = header_bb == &f.getFirstBB() ? "box" : "oval";
+    os << '"' << bb_dot_name(header_bb->getName()) << "\"[label=<" 
+       << bb_dot_name(header_bb->getName())
+       << "<BR /><FONT POINT" 
+       << "-SIZE=\"10\">" << lheader_names[node_data[header_id].type] 
+       << "</FONT>>][shape="<< shape <<"];\n";
+    os << '"' << bb_dot_name(header_bb->getName()) << "\" -> \""
+       << bb_dot_name(node.bb->getName()) << "\";\n";
+    os << '"' << bb_dot_name(node.bb->getName()) << "\"[label=<" 
+       << bb_dot_name(node.bb->getName())
+       << "<BR /><FONT POINT-SIZE=\"10\">" << lheader_names[node.type] 
+       << "</FONT>>]"<<";\n";
+  }
+ 
+  os << "}\n";
+}
+
+vector<const BasicBlock*> LoopTree::getLoopset(const BasicBlock *bb) {
+  vector<const BasicBlock*> loopset;
+  for (auto n : loop_data[bb_map[bb]].nodes)
+    loopset.push_back(node_data[n].bb);
+  return loopset;
+}
+
+vector<pair<const BasicBlock*, vector<const BasicBlock*>>>
+LoopTree::getLoopsets() {
+  vector<pair<const BasicBlock*, vector<const BasicBlock*>>> loopsets;
+  for (auto lhdr : loop_header_ids) {
+    auto &loopset = loopsets.emplace_back(node_data[lhdr].bb, 
+                                         initializer_list<const BasicBlock*>{});
+    for (auto n : loop_data[lhdr].nodes)
+      loopset.second.push_back(node_data[n].bb);
+  }
+  return loopsets;
+}
+
+
+vector<const BasicBlock*> LoopTree::getAltHeaders(const BasicBlock *bb) {
+  vector<const BasicBlock*> alt_headers;
+  for (auto n : loop_data[bb_map[bb]].alternate_headers)
+    alt_headers.push_back(node_data[n].bb);
+  return alt_headers;
+}
 
 // Relies on Alive's top_sort run during llvm2alive conversion in order to
 // traverse the cfg in reverse postorder to build dominators.

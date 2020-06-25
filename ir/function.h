@@ -15,6 +15,7 @@
 #include <string_view>
 #include <tuple>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace smt { class Model; }
@@ -185,6 +186,77 @@ public:
   }
   edge_iterator end() const { return { f.getBBs().end(), f.getBBs().end() }; }
 
+  void printDot(std::ostream &os) const;
+};
+
+class LoopTree final {
+  Function &f;
+  CFG cfg;
+
+  enum LHeaderType { 
+    none = 0, nonheader = 1, self = 2, reducible = 3, irreducible = 4 
+  };
+  struct NodeData {
+    const BasicBlock *bb;
+    std::vector<unsigned> preds; // either back or non-back preds
+    std::vector<unsigned> succs;
+    std::vector<unsigned> non_back_preds;
+    std::vector<unsigned> back_preds;
+    std::vector<unsigned> red_back_in;
+    std::vector<unsigned> other_in;
+    unsigned header;
+    LHeaderType type;
+    bool is_new;
+  };
+
+  struct LoopData {
+    std::vector<unsigned> nodes;
+    std::vector<unsigned> alternate_headers;
+    std::vector<unsigned> child_loops;
+  };
+
+  // A vector disguised as a set that can be hidden and point to another
+  // vecset for convenient union operations
+  struct Vecset {
+    private:
+      std::vector<unsigned> bb_set;
+    public:
+      Vecset() {}
+      Vecset(unsigned repr) { add(repr); }
+      unsigned repr() { return bb_set[0]; }
+      const auto& getAll() const { return bb_set; }
+      void add(unsigned bb) { bb_set.push_back(bb); }
+      void clear() { bb_set.clear(); }
+  };
+  // "sets" for union and find operations
+  std::vector<unsigned> number; // bb id -> preorder 
+  std::vector<unsigned> nodes; // preorder -> bb id
+  std::vector<unsigned> last; // preorder -> preorder
+  // vector of pointers to allow efficient UNION and FIND operations
+  std::vector<Vecset*> vecsets;
+  std::vector<Vecset> vecsets_data;
+
+  // id's of bb's that are loop headers
+  std::vector<unsigned> loop_header_ids;
+
+  // bb -> bb id
+  std::unordered_map<const BasicBlock*, unsigned> bb_map;
+  // bb id of loop header -> loop data
+  std::vector<LoopData> loop_data;
+
+  // new_bbs holds bbs added in fix_loops
+  std::vector<BasicBlock> new_bbs; 
+  std::vector<NodeData> node_data;
+
+  unsigned vecsetFind(unsigned bb);
+  void vecsetUnion(unsigned from, unsigned to);
+  void buildLoopTree();
+public:
+  LoopTree(Function &f, CFG &cfg) : f(f), cfg(cfg) { buildLoopTree(); }
+  std::vector<const BasicBlock*> getLoopset(const BasicBlock *bb);
+  std::vector<std::pair<const BasicBlock*, std::vector<const BasicBlock*>>>
+  getLoopsets();
+  std::vector<const BasicBlock*> getAltHeaders(const BasicBlock *bb);
   void printDot(std::ostream &os) const;
 };
 
