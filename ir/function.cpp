@@ -346,22 +346,15 @@ void CFG::printDot(ostream &os) const {
 // Nesting of Reducible and Irreducible Loops.
 void LoopTree::buildLoopTree() {
   // TODO change bb access by map to access by vector index
-  vector<const BasicBlock*> bbs; // just bbs not in DFS visit order
   vector<unsigned> nodes; // nodes by DFS visit order
   vector<unsigned> number; // ordering for a given node with DFS visit order idx
   vector<unsigned> last; 
   unordered_map<const BasicBlock*, unsigned> bb_map;
   stack<const BasicBlock*> work_list;
   
-  // numbering starts at 1, with 0 as unvisited
-  nodes.emplace_back();
-  number.emplace_back();
-  last.emplace_back();
-
   auto bb_num = [&](const BasicBlock *bb) {
     auto [I, inserted] = bb_map.emplace(bb, bbs.size());
     if (inserted) {
-      bbs.emplace_back(bb);
       nodes.emplace_back();
       number.emplace_back();
       last.emplace_back();
@@ -371,7 +364,7 @@ void LoopTree::buildLoopTree() {
   
   // DFS to establish node ordering
   work_list.push(&f.getFirstBB());
-  unsigned current = 1;
+  unsigned current = 0;
   while (!work_list.empty()) {
     auto current_bb = work_list.top();
     work_list.pop();
