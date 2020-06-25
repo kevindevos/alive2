@@ -348,7 +348,6 @@ void LoopTree::buildLoopTree() {
   vector<unsigned> nodes; // nodes by DFS visit order
   vector<unsigned> number; // ordering for a given node with DFS visit order idx
   vector<unsigned> last;
-  vector<NodeData> node_data;
   unordered_map<const BasicBlock*, unsigned> bb_map;
   
   // source -> target
@@ -469,9 +468,20 @@ void LoopTree::buildLoopTree() {
     }
   }
   // TODO what do i really need from the algorithm for loop analysis?
-  // TODO move stuff out of here into LoopTree as suited
 }
 
+void LoopTree::printDot(std::ostream &os) const {
+  os << "digraph {\n"
+        "\"" << bb_dot_name(f.getBBs()[0]->getName()) << "\" [shape=box];\n";
+  
+  for (auto node : node_data) {
+    auto header_bb = node_data[node.header].bb;
+    os << '"' << bb_dot_name(header_bb->getName()) << "\" -> \""
+       << bb_dot_name(node.bb->getName()) << "\";\n";
+  }
+ 
+  os << "}\n";
+}
 
 // Relies on Alive's top_sort run during llvm2alive conversion in order to
 // traverse the cfg in reverse postorder to build dominators.

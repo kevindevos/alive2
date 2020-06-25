@@ -216,9 +216,11 @@ class LoopTree final {
       void add(unsigned bb) { bb_set.push_back(bb); }
       void clear() { bb_set.clear(); }
   };
+  std::vector<NodeData> node_data;
   void buildLoopTree();
 public:
   LoopTree(Function &f, CFG &cfg) : f(f), cfg(cfg) { buildLoopTree(); }
+  void printDot(std::ostream &os) const;
 };
 
 class DomTree final {
