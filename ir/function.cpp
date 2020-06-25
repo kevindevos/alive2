@@ -395,18 +395,17 @@ void LoopTree::buildLoopTree() {
   };
 
   auto vecsetUnion = [&](unsigned from, unsigned to) {
-    auto from_set = vecsets[from];
-    auto to_set = vecsets[to];
+    auto &from_set = vecsets[from];
+    auto &to_set = vecsets[to];
     for (auto &from_el : from_set->getAll()) {
       to_set->add(from_el);
       vecsets[from_el] = to_set;
     }
     from_set->clear();
   };
-  // check ancestry by bb id
-  auto isAncestor = [&](unsigned a, unsigned b) {
-    auto &w = number[a];
-    auto &v = number[b];
+  
+  // check ancestry by preorder number
+  auto isAncestor = [&](unsigned w, unsigned v) {
     return w <= v && v <= last[w];
   };
   
@@ -438,9 +437,20 @@ void LoopTree::buildLoopTree() {
     }
   }
 
+  // b. distinguish between back edges and non back edges
+  unsigned nodes_size = nodes.size();
+  for (unsigned w = 0; w < nodes_size; ++w) {
+    auto &w_data = node_data[w]; 
+    for (auto &v : w_data.preds) {
+      if (isAncestor(w, v))
+        w_data.back_preds.push_back(v);
+      else
+        w_data.non_back_preds.push_back(v);
+    }
+  }
+
   (void)vecsetFind;
   (void)vecsetUnion;
-  (void)isAncestor;
   // TODO ensure each node has a vecset of itself only at start
   // TODO move stuff out of here into LoopTree as suited
 }
