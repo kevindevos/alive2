@@ -353,13 +353,22 @@ void LoopTree::buildLoopTree() {
   
   // source -> target
   stack<const BasicBlock*> dfs_work_list;
+
+  // "sets" for union and find operations
   vector<Vecset*> vecsets;
   vector<Vecset> vecsets_data;
-  vecsets_data.reserve(f.getBBs().size());
 
-  auto bb_id = [&](const BasicBlock *bb) {
+  // sucessors override when new bbs are added,
+  unordered_map<const BasicBlock*, vector<const BasicBlock*>> succ_override;
+  
+  // reserve more than total number of blocks to prevent necessary
+  // reallocation when adding new pseudo-bbs in fix_loops of this algorithm
+  vecsets_data.reserve(2*f.getBBs().size());
+
+  auto bb_id = [&](const BasicBlock *bb, bool update_sizes = true) {
     auto [I, inserted] = bb_map.emplace(bb, nodes.size());
-    if (inserted) {
+    if (inserted && update_sizes) {
+      // TODO clean this monstrosity
       nodes.emplace_back();
       number.emplace_back();
       last.emplace_back();
@@ -395,33 +404,54 @@ void LoopTree::buildLoopTree() {
   auto entry = &f.getFirstBB();
   dfs_work_list.push(entry);
   unsigned current = START_BB_ID;
-  while (!dfs_work_list.empty()) {
-    auto current_bb = dfs_work_list.top();
-    dfs_work_list.pop();
-    int n = bb_id(current_bb);
-    nodes[current] = n;
-    auto &cur_node_data = node_data[n];
-    cur_node_data.bb = current_bb;
-    
-    if (!visited[n]) { // TODO can't use number as visited for id = 0 possible
-      visited[n] = true;
-      number[n] = current++;
-      vecsets_data[n] = Vecset(n);
-      vecsets[n] = &vecsets_data[n];
-      dfs_work_list.push(current_bb);
-      if (auto instr = dynamic_cast<const JumpInstr*>(&current_bb->back())) {
-        auto tgt_it = const_cast<JumpInstr*>(instr)->targets();
-        for (auto I = tgt_it.begin(), E = tgt_it.end(); I != E; ++I) {
-          auto t_n = bb_id(&(*I));
-          if (!visited[t_n]) {
-            dfs_work_list.push(&(*I));
+
+  auto DFS = [&]() {
+    while (!dfs_work_list.empty()) {
+      auto cur_bb = dfs_work_list.top();
+      dfs_work_list.pop();
+      int n = bb_id(cur_bb);
+      nodes[current] = n;
+      auto &cur_node_data = node_data[n];
+      cur_node_data.bb = cur_bb;
+      
+      if (!visited[n]) { // TODO can't use number as visited for id = 0 possible
+        visited[n] = true;
+        number[n] = current++;
+        vecsets_data[n] = Vecset(n);
+        vecsets[n] = &vecsets_data[n];
+        dfs_work_list.push(cur_bb);
+
+        // if new bbs were not added, use sucessors with targets()
+        auto &succ_overr = succ_override[cur_bb];
+        if (succ_overr.empty()) {
+          if (auto instr = dynamic_cast<const JumpInstr*>(&cur_bb->back())) {
+            auto tgt_it = const_cast<JumpInstr*>(instr)->targets();
+            for (auto I = tgt_it.begin(), E = tgt_it.end(); I != E; ++I) {
+              auto t_n = bb_id(&(*I));
+              if (!visited[t_n])
+                dfs_work_list.push(&(*I));
+              node_data[t_n].preds.insert(n);
+            }
           }
-          node_data[t_n].preds.insert(n);
+        } else {
+          for (auto succ : succ_overr) {
+            auto t_succ = bb_id(succ, false);
+            if (!visited[t_succ])
+              dfs_work_list.push(succ);
+            node_data[t_succ].preds.insert(n);
+          }
         }
+      } else {
+        last[number[n]] = current - 1;
       }
-    } else {
-      last[number[n]] = current - 1;
     }
+  };
+
+  DFS();
+
+  // DEBUG
+  for (auto &node : nodes) {
+    cout << node_data[node].bb->getName() << ":" << node << ":" <<number[node] << endl;
   }
 
   // fix_loops
@@ -436,13 +466,31 @@ void LoopTree::buildLoopTree() {
     }
     if (!w_data.red_back_in.empty() && w_data.other_in.size() > 1) {
       auto &new_bb = new_bbs.emplace_back("#loop_"+w_data.bb->getName());
-      auto new_num = bb_id(&new_bb);
-      auto new_data = node_data[new_num];
-      for (auto &v : w_data.other_in)
-        new_data.preds.insert(v);
-      w_data.preds.clear();
-      w_data.preds.insert(new_num);
+      succ_override[node_data[w].bb].push_back(&new_bb); // w -> w'
+      // for each predecessor of w, make them point to new bb instead
+      for (auto &v : w_data.other_in) {
+        auto v_bb = node_data[v].bb;
+        auto &v_sucessors = succ_override[v_bb];
+        // copy old sucessors except w
+        if (auto instr = dynamic_cast<const JumpInstr*>(&v_bb->back())) {
+          auto tgt_it = const_cast<JumpInstr*>(instr)->targets();
+          for (auto I = tgt_it.begin(), E = tgt_it.end(); I != E; ++I) {
+            auto t_bb = &(*I);
+            if (t_bb != w_data.bb)
+              v_sucessors.push_back(t_bb);
+          }
+        }
+        // add w' as sucessor to bb v instead of w
+        v_sucessors.push_back(&new_bb);
+      }
     }
+  }
+
+  // if new bbs were created, run DFS again for new preorder
+  if (!new_bbs.empty()) {
+    visited.clear();
+    bb_map.clear();
+    DFS();
   }
 
   // analyze_loops
