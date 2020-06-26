@@ -354,6 +354,7 @@ void LoopTree::buildLoopTree() {
   stack<const BasicBlock*> dfs_work_list;
   vector<Vecset*> vecsets;
   vector<Vecset> vecsets_data;
+  vecsets_data.reserve(f.getBBs().size());
 
   auto bb_id = [&](const BasicBlock *bb) {
     auto [I, inserted] = bb_map.emplace(bb, nodes.size());
@@ -373,9 +374,9 @@ void LoopTree::buildLoopTree() {
   };
 
   auto vecsetUnion = [&](unsigned from, unsigned to) {
-    auto &from_set = vecsets[from];
-    auto &to_set = vecsets[to];
-    for (auto &from_el : from_set->getAll()) {
+    auto from_set = vecsets[from];
+    auto to_set = vecsets[to];
+    for (auto from_el : from_set->getAll()) {
       to_set->add(from_el);
       vecsets[from_el] = to_set;
     }
@@ -482,7 +483,7 @@ void LoopTree::buildLoopTree() {
 void LoopTree::printDot(std::ostream &os) const {
   os << "digraph {\n"
         "\"" << bb_dot_name(f.getBBs()[0]->getName()) << "\" [shape=box];\n";
-  
+ 
   for (auto node : node_data) {
     if (node.bb == &f.getFirstBB())
       continue;
