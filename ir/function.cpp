@@ -427,7 +427,7 @@ void LoopTree::buildLoopTree() {
     w_data.header = START_BB_ID;
     w_data.type = LHeaderType::nonheader;
     for (auto &v : w_data.preds) {
-      if (isAncestor(w, v))
+      if (isAncestor(w, number[v]))
         w_data.back_preds.push_back(v);
       else
         w_data.non_back_preds.push_back(v);
@@ -457,7 +457,7 @@ void LoopTree::buildLoopTree() {
       work_list.pop();
       for (auto &y : node_data[x].non_back_preds) {
         unsigned y_ = vecsetFind(y);
-        if (!isAncestor(w, y_)) {
+        if (!isAncestor(w, number[y_])) {
           w_data.type = LHeaderType::irreducible;
           w_data.non_back_preds.push_back(y_);
         } else if (!P.count(y_) && y_ != w) {
