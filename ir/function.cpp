@@ -391,15 +391,14 @@ void LoopTree::buildLoopTree() {
   // DFS to establish node ordering
   unsigned START_BB_ID = 0;
   auto entry = &f.getFirstBB();
-  dfs_work_list.emplace(START_BB_ID, entry);
+  dfs_work_list.push(entry);
   unsigned current = START_BB_ID;
   while (!dfs_work_list.empty()) {
-    auto &[source, current_bb] = dfs_work_list.top();
+    auto current_bb = dfs_work_list.top();
     dfs_work_list.pop();
     int n = bb_num(current_bb);
     nodes[current] = n;
     auto &cur_node_data = node_data[n];
-    cur_node_data.preds.push_back(source);
     cur_node_data.bb = current_bb;
     
     if (!number[n]) {
@@ -410,8 +409,10 @@ void LoopTree::buildLoopTree() {
         auto tgt_it = const_cast<JumpInstr*>(instr)->targets();
         for (auto I = tgt_it.begin(), E = tgt_it.end(); I != E; ++I) {
           auto t_n = bb_num(&(*I));
-          if (!number[t_n])
-            dfs_work_list.emplace(n, &(*I));
+          if (!number[t_n]) {
+            dfs_work_list.push(&(*I));
+            node_data[t_n].preds.push_back(n);
+          }
         }
       }
     } else {
