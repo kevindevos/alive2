@@ -485,7 +485,7 @@ void LoopTree::printDot(std::ostream &os) const {
         "\"" << bb_dot_name(f.getBBs()[0]->getName()) << "\" [shape=box];\n";
  
   for (auto node : node_data) {
-    if (node.bb == &f.getFirstBB())
+    if (node.bb == &f.getFirstBB() || node.back_preds.empty())
       continue;
     auto header_bb = node_data[node.header].bb;
     os << '"' << bb_dot_name(header_bb->getName()) << "\" -> \""
