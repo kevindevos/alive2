@@ -197,7 +197,7 @@ class LoopTree final {
   };
   struct NodeData {
     const BasicBlock *bb;
-    std::vector<unsigned> preds; // either back or non_back preds
+    std::unordered_set<unsigned> preds; // either back or non_back preds
     std::vector<unsigned> non_back_preds;
     std::vector<unsigned> back_preds;
     unsigned header;

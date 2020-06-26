@@ -411,8 +411,8 @@ void LoopTree::buildLoopTree() {
           auto t_n = bb_num(&(*I));
           if (!number[t_n]) {
             dfs_work_list.push(&(*I));
-            node_data[t_n].preds.push_back(n);
           }
+          node_data[t_n].preds.insert(n);
         }
       }
     } else {
