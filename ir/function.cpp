@@ -438,15 +438,12 @@ void LoopTree::buildLoopTree() {
       auto &new_bb = new_bbs.emplace_back("#loop_"+w_data.bb->getName());
       auto new_num = bb_id(&new_bb);
       auto new_data = node_data[new_num];
-      for (auto &v : w_data.preds)
+      for (auto &v : w_data.other_in)
         new_data.preds.insert(v);
       w_data.preds.clear();
       w_data.preds.insert(new_num);
     }
   }
-  // TODO what happens when adding more nodes with identifying loops in CFGs?
-  // TODO vecset will reallocate after adding extra nodes in fix_loops
-  // initialize them separately after fix_loops + after reserve further down?
 
   // analyze_loops
   // b. distinguish between back edges and non back edges
@@ -505,7 +502,6 @@ void LoopTree::buildLoopTree() {
     if (!w_num)
       break;
   }
-  // TODO what do i really need from the algorithm for loop analysis?
 }
 
 void LoopTree::printDot(std::ostream &os) const {
