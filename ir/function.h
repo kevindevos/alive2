@@ -211,6 +211,7 @@ class LoopTree final {
       std::vector<unsigned> bb_set;
     public:
       Vecset() {}
+      Vecset(unsigned repr) { add(repr); }
       unsigned repr() { return bb_set[0]; }
       const auto& getAll() { return bb_set; }
       void add(unsigned bb) { bb_set.push_back(bb); }

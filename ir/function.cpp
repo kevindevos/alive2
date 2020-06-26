@@ -404,7 +404,8 @@ void LoopTree::buildLoopTree() {
     
     if (!number[n]) {
       number[n] = current++;
-      vecsets[n]->add(n);
+      vecsets_data[n] = Vecset(n);
+      vecsets[n] = &vecsets_data[n];
       if (auto instr = dynamic_cast<const JumpInstr*>(&current_bb->back())) {
         auto tgt_it = const_cast<JumpInstr*>(instr)->targets();
         for (auto I = tgt_it.begin(), E = tgt_it.end(); I != E; ++I) {
