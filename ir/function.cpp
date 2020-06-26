@@ -421,6 +421,31 @@ void LoopTree::buildLoopTree() {
     }
   }
 
+  // fix_loops
+  for (unsigned w_num = 0; w_num < nodes.size(); ++w_num) {
+    auto &w = nodes[w_num];
+    auto &w_data = node_data[w];
+    for (auto &v : w_data.preds) {
+      if (w_num <= number[v]) 
+        w_data.red_back_in.push_back(v);
+      else
+        w_data.other_in.push_back(v);
+    }
+    if (!w_data.red_back_in.empty() && w_data.other_in.size() > 1) {
+      auto &new_bb = new_bbs.emplace_back("#loop_"+w_data.bb->getName());
+      auto new_num = bb_id(&new_bb);
+      auto new_data = node_data[new_num];
+      for (auto &v : w_data.preds)
+        new_data.preds.insert(v);
+      w_data.preds.clear();
+      w_data.preds.insert(new_num);
+    }
+  }
+  // TODO what happens when adding more nodes with identifying loops in CFGs?
+  // TODO vecset will reallocate after adding extra nodes in fix_loops
+  // initialize them separately after fix_loops + after reserve further down?
+
+  // analyze_loops
   // b. distinguish between back edges and non back edges
   unsigned nodes_size = nodes.size();
   for (unsigned w_num = 0; w_num < nodes_size; ++w_num) {
