@@ -348,6 +348,7 @@ void LoopTree::buildLoopTree() {
   vector<unsigned> nodes; // nodes indexed by preorder
   vector<unsigned> number; // preorder number for bb given id in bb_map
   vector<unsigned> last;
+  vector<bool> visited;
   unordered_map<const BasicBlock*, unsigned> bb_map;
   
   // source -> target
@@ -365,6 +366,7 @@ void LoopTree::buildLoopTree() {
       node_data.emplace_back();
       vecsets.emplace_back();
       vecsets_data.emplace_back();
+      visited.emplace_back();
     }
     return I->second;
   };
@@ -401,7 +403,8 @@ void LoopTree::buildLoopTree() {
     auto &cur_node_data = node_data[n];
     cur_node_data.bb = current_bb;
     
-    if (!number[n]) {
+    if (!visited[n]) { // TODO can't use number as visited for id = 0 possible
+      visited[n] = true;
       number[n] = current++;
       vecsets_data[n] = Vecset(n);
       vecsets[n] = &vecsets_data[n];
@@ -410,7 +413,7 @@ void LoopTree::buildLoopTree() {
         auto tgt_it = const_cast<JumpInstr*>(instr)->targets();
         for (auto I = tgt_it.begin(), E = tgt_it.end(); I != E; ++I) {
           auto t_n = bb_id(&(*I));
-          if (!number[t_n]) {
+          if (!visited[t_n]) {
             dfs_work_list.push(&(*I));
           }
           node_data[t_n].preds.insert(n);
