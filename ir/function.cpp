@@ -424,7 +424,7 @@ void LoopTree::buildLoopTree() {
   for (unsigned w_num = 0; w_num < nodes_size; ++w_num) {
     auto &w = nodes[w_num];
     auto &w_data = node_data[w];
-    w_data.header = START_BB_ID;
+    w_data.header = 0;
     w_data.type = LHeaderType::nonheader;
     for (auto &v : w_data.preds) {
       if (isAncestor(w_num, number[v]))
@@ -435,7 +435,7 @@ void LoopTree::buildLoopTree() {
   }
 
   // c. d. e. core of the algorithm
-  node_data[0].header = LHeaderType::none;
+  node_data[0].header = 0;
   unordered_set<unsigned> P;
   stack<unsigned> work_list;
   for (unsigned w_num = nodes_size - 1; ; --w_num) {
