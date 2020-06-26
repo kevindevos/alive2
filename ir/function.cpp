@@ -437,7 +437,7 @@ void LoopTree::buildLoopTree() {
   node_data[0].header = LHeaderType::none;
   unordered_set<unsigned> P;
   stack<unsigned> work_list;
-  for (unsigned w = nodes_size - 1; w >= 0; --w) {
+  for (unsigned w = nodes_size - 1; ; --w) {
     P.clear();
     auto &w_data = node_data[w];
     for (auto &v : w_data.back_preds) {
@@ -469,6 +469,9 @@ void LoopTree::buildLoopTree() {
       node_data[x].header = w;
       vecsetUnion(x, w);
     }
+     // terminate for loop with descending unsigned index without underflow
+    if (!w)
+      break;
   }
   // TODO what do i really need from the algorithm for loop analysis?
 }
