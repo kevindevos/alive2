@@ -200,6 +200,8 @@ class LoopTree final {
     std::unordered_set<unsigned> preds; // either back or non_back preds
     std::vector<unsigned> non_back_preds;
     std::vector<unsigned> back_preds;
+    std::vector<unsigned> red_back_in;
+    std::vector<unsigned> other_in;
     unsigned header;
     LHeaderType type;
   };
@@ -217,6 +219,8 @@ class LoopTree final {
       void add(unsigned bb) { bb_set.push_back(bb); }
       void clear() { bb_set.clear(); }
   };
+  // new_bbs holds temporary bbs known only here for the loop header tree
+  std::vector<BasicBlock> new_bbs; 
   std::vector<NodeData> node_data;
   void buildLoopTree();
 public:
