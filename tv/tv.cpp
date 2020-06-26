@@ -170,6 +170,10 @@ struct TVPass final : public llvm::FunctionPass {
       ofstream fileDom(f.getName() + '.' + to_string(I->second.second++) +
                        ".dom.dot");
       DomTree(f, cfg).printDot(fileDom);
+      ofstream fileLoop(f.getName() + '.' + to_string(I->second.second++) +
+                       ".loop.dot");
+      LoopTree loop_tree(f, cfg);
+      loop_tree.printDot(fileLoop);
     }
 
     if (first)
