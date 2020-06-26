@@ -345,18 +345,17 @@ void CFG::printDot(ostream &os) const {
 // Havlak, Paul (1997).
 // Nesting of Reducible and Irreducible Loops.
 void LoopTree::buildLoopTree() {
-  vector<unsigned> nodes; // nodes by DFS visit order
-  vector<unsigned> number; // ordering for a given node with DFS visit order idx
+  vector<unsigned> nodes; // nodes indexed by preorder
+  vector<unsigned> number; // preorder number for bb given id in bb_map
   vector<unsigned> last;
   unordered_map<const BasicBlock*, unsigned> bb_map;
   
   // source -> target
-  stack<pair<unsigned, const BasicBlock*>> dfs_work_list;
-  
+  stack<const BasicBlock*> dfs_work_list;
   vector<Vecset*> vecsets;
   vector<Vecset> vecsets_data;
 
-  auto bb_num = [&](const BasicBlock *bb) {
+  auto bb_id = [&](const BasicBlock *bb) {
     auto [I, inserted] = bb_map.emplace(bb, nodes.size());
     if (inserted) {
       nodes.emplace_back();
@@ -396,7 +395,7 @@ void LoopTree::buildLoopTree() {
   while (!dfs_work_list.empty()) {
     auto current_bb = dfs_work_list.top();
     dfs_work_list.pop();
-    int n = bb_num(current_bb);
+    int n = bb_id(current_bb);
     nodes[current] = n;
     auto &cur_node_data = node_data[n];
     cur_node_data.bb = current_bb;
@@ -408,7 +407,7 @@ void LoopTree::buildLoopTree() {
       if (auto instr = dynamic_cast<const JumpInstr*>(&current_bb->back())) {
         auto tgt_it = const_cast<JumpInstr*>(instr)->targets();
         for (auto I = tgt_it.begin(), E = tgt_it.end(); I != E; ++I) {
-          auto t_n = bb_num(&(*I));
+          auto t_n = bb_id(&(*I));
           if (!number[t_n]) {
             dfs_work_list.push(&(*I));
           }
@@ -422,12 +421,13 @@ void LoopTree::buildLoopTree() {
 
   // b. distinguish between back edges and non back edges
   unsigned nodes_size = nodes.size();
-  for (unsigned w = 0; w < nodes_size; ++w) {
+  for (unsigned w_num = 0; w_num < nodes_size; ++w_num) {
+    auto &w = nodes[w_num];
     auto &w_data = node_data[w];
     w_data.header = START_BB_ID;
     w_data.type = LHeaderType::nonheader;
     for (auto &v : w_data.preds) {
-      if (isAncestor(w, number[v]))
+      if (isAncestor(w_num, number[v]))
         w_data.back_preds.push_back(v);
       else
         w_data.non_back_preds.push_back(v);
@@ -438,7 +438,8 @@ void LoopTree::buildLoopTree() {
   node_data[0].header = LHeaderType::none;
   unordered_set<unsigned> P;
   stack<unsigned> work_list;
-  for (unsigned w = nodes_size - 1; ; --w) {
+  for (unsigned w_num = nodes_size - 1; ; --w_num) {
+    auto &w = nodes[w_num];
     P.clear();
     auto &w_data = node_data[w];
     for (auto &v : w_data.back_preds) {
@@ -457,7 +458,7 @@ void LoopTree::buildLoopTree() {
       work_list.pop();
       for (auto &y : node_data[x].non_back_preds) {
         unsigned y_ = vecsetFind(y);
-        if (!isAncestor(w, number[y_])) {
+        if (!isAncestor(w_num, number[y_])) {
           w_data.type = LHeaderType::irreducible;
           w_data.non_back_preds.push_back(y_);
         } else if (!P.count(y_) && y_ != w) {
@@ -471,7 +472,7 @@ void LoopTree::buildLoopTree() {
       vecsetUnion(x, w);
     }
      // terminate for loop with descending unsigned index without underflow
-    if (!w)
+    if (!w_num)
       break;
   }
   // TODO what do i really need from the algorithm for loop analysis?
