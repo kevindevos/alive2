@@ -481,15 +481,20 @@ void LoopTree::buildLoopTree() {
 }
 
 void LoopTree::printDot(std::ostream &os) const {
-  os << "digraph {\n"
-        "\"" << bb_dot_name(f.getBBs()[0]->getName()) << "\" [shape=box];\n";
- 
+  os << "digraph {\n";
+
   for (auto node : node_data) {
     if (node.bb == &f.getFirstBB() || node.back_preds.empty())
       continue;
+    
     auto header_bb = node_data[node.header].bb;
-    os << '"' << bb_dot_name(header_bb->getName()) << "\" -> \""
-       << bb_dot_name(node.bb->getName()) << "\";\n";
+    if (header_bb == &f.getFirstBB()) {
+      os << '"' << bb_dot_name(node.bb->getName()) << "\" [shape=box];\n";
+    } else {
+      os << '"' << bb_dot_name(node.bb->getName()) << "\" [shape=oval];\n";
+      os << '"' << bb_dot_name(header_bb->getName()) << "\" -> \""
+         << bb_dot_name(node.bb->getName()) << "\";\n";
+    }
   }
  
   os << "}\n";
