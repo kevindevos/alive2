@@ -5,6 +5,7 @@
 #include "ir/instr.h"
 #include "util/errors.h"
 #include <stack>
+#include <iostream>
 
 using namespace smt;
 using namespace util;
@@ -340,35 +341,42 @@ void CFG::printDot(ostream &os) const {
   os << "}\n";
 }
 
+// Get the representative of the set that presently contains basicblock bb
+unsigned LoopTree::vecsetFind(unsigned bb) {
+  return vecsets[bb]->repr();
+}
+
+// Move all elements in from set into to set, and clear from set
+void LoopTree::vecsetUnion(unsigned from, unsigned to) {
+  auto from_set = vecsets[from];
+  auto to_set = vecsets[to];
+  for (auto from_el : from_set->getAll()) {
+    to_set->add(from_el);
+    vecsets[from_el] = to_set;
+  }
+  from_set->clear();
+}
+
 // Build a tree of loop headers and their nested loop headers
 // Adaptation of the algorithm in the article
 // Havlak, Paul (1997).
 // Nesting of Reducible and Irreducible Loops.
 void LoopTree::buildLoopTree() {
-  vector<unsigned> nodes; // nodes indexed by preorder
-  vector<unsigned> number; // preorder number for bb given id in bb_map
-  vector<unsigned> last;
-  vector<bool> visited;
-  unordered_map<const BasicBlock*, unsigned> bb_map;
+  vector<unsigned> nodes; // preorder -> bb id
+  vector<unsigned> number; // bb id -> preorder 
+  vector<unsigned> last; // preorder -> preorder
+  vector<bool> visited; // bb id -> visited
   
-  // source -> target
-  stack<const BasicBlock*> dfs_work_list;
-
-  // "sets" for union and find operations
-  vector<Vecset*> vecsets;
-  vector<Vecset> vecsets_data;
-
-  // sucessors override when new bbs are added,
+  // used in DFS to override sucessor list of a bb when fix_loops added new bbs
   unordered_map<const BasicBlock*, vector<const BasicBlock*>> succ_override;
   
   // reserve more than total number of blocks to prevent necessary
-  // reallocation when adding new pseudo-bbs in fix_loops of this algorithm
+  // reallocation when adding new bbs in procedure fix_loops
   vecsets_data.reserve(2*f.getBBs().size());
 
   auto bb_id = [&](const BasicBlock *bb, bool update_sizes = true) {
     auto [I, inserted] = bb_map.emplace(bb, nodes.size());
     if (inserted && update_sizes) {
-      // TODO clean this monstrosity
       nodes.emplace_back();
       number.emplace_back();
       last.emplace_back();
@@ -380,32 +388,29 @@ void LoopTree::buildLoopTree() {
     return I->second;
   };
   
-  auto vecsetFind = [&](unsigned bb) {
-    return vecsets[bb]->repr();
-  };
-
-  auto vecsetUnion = [&](unsigned from, unsigned to) {
-    auto from_set = vecsets[from];
-    auto to_set = vecsets[to];
-    for (auto from_el : from_set->getAll()) {
-      to_set->add(from_el);
-      vecsets[from_el] = to_set;
-    }
-    from_set->clear();
-  };
-  
-  // check ancestry by preorder number
+  // check if bb with preorder w is an ancestor of bb with preorder v
   auto isAncestor = [&](unsigned w, unsigned v) {
     return w <= v && v <= last[w];
   };
   
   // DFS to establish node ordering
-  unsigned START_BB_ID = 0;
-  auto entry = &f.getFirstBB();
-  dfs_work_list.push(entry);
-  unsigned current = START_BB_ID;
-
   auto DFS = [&]() {
+    // source -> target
+    stack<const BasicBlock*> dfs_work_list;
+
+    unsigned START_BB_ID = 0;
+    auto entry = &f.getFirstBB();
+    dfs_work_list.push(entry);
+    unsigned current = START_BB_ID;
+
+    auto try_push_worklist = [&](const BasicBlock *bb, unsigned pred, 
+                                 bool update = true) {
+      auto t_n = bb_id(bb, update);
+      if (!visited[t_n])
+        dfs_work_list.push(bb);
+      node_data[t_n].preds.insert(pred);
+    };
+
     while (!dfs_work_list.empty()) {
       auto cur_bb = dfs_work_list.top();
       dfs_work_list.pop();
@@ -414,32 +419,25 @@ void LoopTree::buildLoopTree() {
       auto &cur_node_data = node_data[n];
       cur_node_data.bb = cur_bb;
       
-      if (!visited[n]) { // TODO can't use number as visited for id = 0 possible
+      if (!visited[n]) {
         visited[n] = true;
         number[n] = current++;
         vecsets_data[n] = Vecset(n);
         vecsets[n] = &vecsets_data[n];
         dfs_work_list.push(cur_bb);
 
-        // if new bbs were not added, use sucessors with targets()
+        // add sucessors to work_list if not visited
         auto &succ_overr = succ_override[cur_bb];
         if (succ_overr.empty()) {
           if (auto instr = dynamic_cast<const JumpInstr*>(&cur_bb->back())) {
             auto tgt_it = const_cast<JumpInstr*>(instr)->targets();
-            for (auto I = tgt_it.begin(), E = tgt_it.end(); I != E; ++I) {
-              auto t_n = bb_id(&(*I));
-              if (!visited[t_n])
-                dfs_work_list.push(&(*I));
-              node_data[t_n].preds.insert(n);
-            }
+            for (auto I = tgt_it.begin(), E = tgt_it.end(); I != E; ++I)
+              try_push_worklist(&(*I), n);
           }
         } else {
-          for (auto succ : succ_overr) {
-            auto t_succ = bb_id(succ, false);
-            if (!visited[t_succ])
-              dfs_work_list.push(succ);
-            node_data[t_succ].preds.insert(n);
-          }
+          // if new bbs were added from fix_loops, use succ_overr instead
+          for (auto succ : succ_overr)
+            try_push_worklist(succ, n, false);
         }
       } else {
         last[number[n]] = current - 1;
@@ -447,14 +445,12 @@ void LoopTree::buildLoopTree() {
     }
   };
 
+  // Run DFS to build preorder numbering and the vecsets for analyze_loops
   DFS();
 
-  // DEBUG
-  for (auto &node : nodes) {
-    cout << node_data[node].bb->getName() << ":" << node << ":" <<number[node] << endl;
-  }
-
-  // fix_loops
+  // fix_loops procedure: adds pseudo-bbs where needed in order to go around
+  // the limitation of not being able to assign multiple header types to the 
+  // same loop header
   for (unsigned w_num = 0; w_num < nodes.size(); ++w_num) {
     auto &w = nodes[w_num];
     auto &w_data = node_data[w];
@@ -467,10 +463,12 @@ void LoopTree::buildLoopTree() {
     if (!w_data.red_back_in.empty() && w_data.other_in.size() > 1) {
       auto &new_bb = new_bbs.emplace_back("#loop_"+w_data.bb->getName());
       succ_override[node_data[w].bb].push_back(&new_bb); // w -> w'
+      
       // for each predecessor of w, make them point to new bb instead
       for (auto &v : w_data.other_in) {
         auto v_bb = node_data[v].bb;
         auto &v_sucessors = succ_override[v_bb];
+
         // copy old sucessors except w
         if (auto instr = dynamic_cast<const JumpInstr*>(&v_bb->back())) {
           auto tgt_it = const_cast<JumpInstr*>(instr)->targets();
@@ -486,7 +484,8 @@ void LoopTree::buildLoopTree() {
     }
   }
 
-  // if new bbs were created, run DFS again for new preorder
+  // if new bbs were created in fix_loops, rerun DFS for updated preorder
+  // numbering
   if (!new_bbs.empty()) {
     visited.clear();
     bb_map.clear();
@@ -509,7 +508,9 @@ void LoopTree::buildLoopTree() {
     }
   }
 
-  // c. d. e. core of the algorithm
+  // c. d. e. 
+  // for each node with incoming reducible backedge, builds a set of bbs
+  // that represents the loop, sets the loop header and type
   node_data[0].header = 0;
   unordered_set<unsigned> P;
   stack<unsigned> work_list;

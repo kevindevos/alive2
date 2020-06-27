@@ -219,9 +219,19 @@ class LoopTree final {
       void add(unsigned bb) { bb_set.push_back(bb); }
       void clear() { bb_set.clear(); }
   };
+  // "sets" for union and find operations
+  std::vector<Vecset*> vecsets;
+  std::vector<Vecset> vecsets_data;
+
+  // bb -> bb id
+  std::unordered_map<const BasicBlock*, unsigned> bb_map;
+
   // new_bbs holds temporary bbs known only here for the loop header tree
   std::vector<BasicBlock> new_bbs; 
   std::vector<NodeData> node_data;
+
+  unsigned vecsetFind(unsigned bb);
+  void vecsetUnion(unsigned from, unsigned to);
   void buildLoopTree();
 public:
   LoopTree(Function &f, CFG &cfg) : f(f), cfg(cfg) { buildLoopTree(); }
