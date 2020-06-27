@@ -488,6 +488,7 @@ void LoopTree::buildLoopTree() {
   if (!new_bbs.empty()) {
     visited.clear();
     bb_map.clear();
+    node_data.clear();
     DFS();
   }
 
@@ -554,16 +555,25 @@ void LoopTree::buildLoopTree() {
 
 void LoopTree::printDot(std::ostream &os) const {
   os << "digraph {\n";
+  
+  vector<string> lheader_names {
+    "none", "nonheader", "self", "reducible", "irreducible"
+  };
 
   for (auto node : node_data) {
     if (node.bb == &f.getFirstBB() || node.back_preds.empty())
       continue;
     
     auto header_bb = node_data[node.header].bb;
+    auto bb_name = bb_dot_name(node.bb->getName());
     if (header_bb == &f.getFirstBB()) {
-      os << '"' << bb_dot_name(node.bb->getName()) << "\" [shape=box];\n";
+      os << '"' << bb_name << "\"[label=<" << bb_name << "<BR /><FONT POINT" 
+         << "-SIZE=\"10\">" << lheader_names[node.type] 
+         << "</FONT>>][shape=box];\n";
     } else {
-      os << '"' << bb_dot_name(node.bb->getName()) << "\" [shape=oval];\n";
+      os << '"' << bb_name << "\"[label=<" << bb_name << "<BR /><FONT POINT" 
+         << "-SIZE=\"10\">" << lheader_names[node.type] 
+         << "</FONT>>][shape=oval];\n";
       os << '"' << bb_dot_name(header_bb->getName()) << "\" -> \""
          << bb_dot_name(node.bb->getName()) << "\";\n";
     }
