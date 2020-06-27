@@ -461,6 +461,7 @@ void LoopTree::buildLoopTree() {
     }
     if (!w_data.red_back_in.empty() && w_data.other_in.size() > 1) {
       auto &new_bb = new_bbs.emplace_back("#loop_"+w_data.bb->getName());
+      bb_id(&new_bb); // add to bb_map to ensure allocation of new elements
       succ_override[node_data[w].bb].push_back(&new_bb); // w -> w'
       
       // for each predecessor of w, make them point to new bb instead
@@ -488,7 +489,9 @@ void LoopTree::buildLoopTree() {
   if (!new_bbs.empty()) {
     visited.clear();
     bb_map.clear();
+    unsigned old_size = node_data.size();
     node_data.clear();
+    node_data.resize(old_size);
     DFS();
   }
 
