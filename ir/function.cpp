@@ -395,7 +395,6 @@ void LoopTree::buildLoopTree() {
   
   // DFS to establish node ordering
   auto DFS = [&]() {
-    // source -> target
     stack<const BasicBlock*> dfs_work_list;
 
     unsigned START_BB_ID = 0;

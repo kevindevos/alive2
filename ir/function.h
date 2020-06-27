@@ -226,7 +226,7 @@ class LoopTree final {
   // bb -> bb id
   std::unordered_map<const BasicBlock*, unsigned> bb_map;
 
-  // new_bbs holds temporary bbs known only here for the loop header tree
+  // new_bbs holds bbs added in fix_loops
   std::vector<BasicBlock> new_bbs; 
   std::vector<NodeData> node_data;
 
