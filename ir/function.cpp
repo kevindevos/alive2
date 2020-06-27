@@ -489,6 +489,8 @@ void LoopTree::buildLoopTree() {
     visited.clear();
     bb_map.clear();
     node_data.clear();
+    vecsets.clear();
+    vecsets_data.clear();
     DFS();
   }
 
