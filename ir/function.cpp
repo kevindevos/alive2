@@ -375,7 +375,7 @@ void LoopTree::buildLoopTree() {
   vecsets_data.reserve(2*f.getBBs().size());
 
   auto bb_id = [&](const BasicBlock *bb) {
-    auto [I, inserted] = bb_map.emplace(bb, nodes.size());
+    auto [I, inserted] = bb_map.emplace(bb, node_data.size());
     if (inserted) {
       nodes.emplace_back();
       number.emplace_back();
@@ -488,6 +488,7 @@ void LoopTree::buildLoopTree() {
     // TODO group data structures together to reduce resize complexity
     visited.clear();
     bb_map.clear();
+    node_data.clear();
     DFS();
   }
 
