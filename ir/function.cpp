@@ -374,9 +374,9 @@ void LoopTree::buildLoopTree() {
   // reallocation when adding new bbs in procedure fix_loops
   vecsets_data.reserve(2*f.getBBs().size());
 
-  auto bb_id = [&](const BasicBlock *bb, bool update_sizes = true) {
+  auto bb_id = [&](const BasicBlock *bb) {
     auto [I, inserted] = bb_map.emplace(bb, nodes.size());
-    if (inserted && update_sizes) {
+    if (inserted) {
       nodes.emplace_back();
       number.emplace_back();
       last.emplace_back();
@@ -402,9 +402,8 @@ void LoopTree::buildLoopTree() {
     dfs_work_list.push(entry);
     unsigned current = START_BB_ID;
 
-    auto try_push_worklist = [&](const BasicBlock *bb, unsigned pred, 
-                                 bool update = true) {
-      auto t_n = bb_id(bb, update);
+    auto try_push_worklist = [&](const BasicBlock *bb, unsigned pred) {
+      auto t_n = bb_id(bb);
       if (!visited[t_n])
         dfs_work_list.push(bb);
       node_data[t_n].preds.insert(pred);
@@ -436,7 +435,7 @@ void LoopTree::buildLoopTree() {
         } else {
           // if new bbs were added from fix_loops, use succ_overr instead
           for (auto succ : succ_overr)
-            try_push_worklist(succ, n, false);
+            try_push_worklist(succ, n);
         }
       } else {
         last[number[n]] = current - 1;
@@ -461,7 +460,6 @@ void LoopTree::buildLoopTree() {
     }
     if (!w_data.red_back_in.empty() && w_data.other_in.size() > 1) {
       auto &new_bb = new_bbs.emplace_back("#loop_"+w_data.bb->getName());
-      bb_id(&new_bb); // add to bb_map to ensure allocation of new elements
       succ_override[&new_bb].push_back(w_data.bb); // w' -> w
       
       // for each predecessor of w, make them point to new bb instead
@@ -487,12 +485,9 @@ void LoopTree::buildLoopTree() {
   // if new bbs were created in fix_loops, rerun DFS for updated preorder
   // numbering
   if (!new_bbs.empty()) {
-    unsigned old_size = node_data.size();
+    // TODO group data structures together to reduce resize complexity
     visited.clear();
-    visited.resize(old_size + new_bbs.size());
     bb_map.clear();
-    node_data.clear();
-    node_data.resize(old_size + new_bbs.size());
     DFS();
   }
 
