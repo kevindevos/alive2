@@ -539,9 +539,9 @@ void LoopTree::buildLoopTree() {
         if (!isAncestor(w_num, number[y_])) {
           w_data.type = LHeaderType::irreducible;
           w_data.non_back_preds.push_back(y_);
-        } else if (!P.count(y_) && y_ != w) {
-          P.insert(y_);
-          work_list.push(y_);
+        } else if (y_ != w) {
+          if (P.insert(y_).second)
+            work_list.push(y_);
         }
       }
     }
