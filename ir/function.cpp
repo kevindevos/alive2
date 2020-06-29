@@ -545,9 +545,11 @@ void LoopTree::buildLoopTree() {
         }
       }
     }
-    for (auto x : P) {
-      node_data[x].header = w;
-      vecsetUnion(x, w);
+    if (!P.empty()) {
+      for (auto x : P) {
+        node_data[x].header = w;
+        vecsetUnion(x, w);
+      }
       auto &loop_set = loop_sets[w];
       for (auto el : vecsets[w]->getAll())
         loop_set.insert(el);
