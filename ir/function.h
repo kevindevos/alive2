@@ -222,6 +222,7 @@ class LoopTree final {
   // "sets" for union and find operations
   std::vector<Vecset*> vecsets;
   std::vector<Vecset> vecsets_data;
+  std::unordered_map<unsigned, std::unordered_set<unsigned>> loop_sets; // DEBUG, use vector instead
 
   // bb -> bb id
   std::unordered_map<const BasicBlock*, unsigned> bb_map;

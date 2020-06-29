@@ -548,6 +548,9 @@ void LoopTree::buildLoopTree() {
     for (auto x : P) {
       node_data[x].header = w;
       vecsetUnion(x, w);
+      auto &loop_set = loop_sets[w];
+      for (auto el : vecsets[w]->getAll())
+        loop_set.insert(el);
     }
      // terminate for loop with descending unsigned index without underflow
     if (!w_num)
