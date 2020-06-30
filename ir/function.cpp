@@ -362,8 +362,6 @@ void LoopTree::vecsetUnion(unsigned from, unsigned to) {
 // Havlak, Paul (1997).
 // Nesting of Reducible and Irreducible Loops.
 void LoopTree::buildLoopTree() {
-  vector<unsigned> nodes; // preorder -> bb id
-  vector<unsigned> number; // bb id -> preorder 
   vector<unsigned> last; // preorder -> preorder
   vector<bool> visited; // bb id -> visited
   
@@ -510,6 +508,11 @@ void LoopTree::buildLoopTree() {
     }
   }
 
+  // DEBUG print preorder number and creation id per bb
+  for (auto node : nodes) {
+    cout << node_data[node].bb->getName() << "=" << node << ":" << number[node] << endl;
+  }
+
   // c. d. e. 
   // for each node with incoming reducible backedge, builds a set of bbs
   // that represents the loop, sets the loop header and type
@@ -554,7 +557,7 @@ void LoopTree::buildLoopTree() {
       for (auto el : vecsets[w]->getAll())
         loop_set.insert(el);
     }
-     // terminate for loop with descending unsigned index without underflow
+    // terminate for loop with descending unsigned index without underflow
     if (!w_num)
       break;
   }
@@ -567,23 +570,19 @@ void LoopTree::printDot(std::ostream &os) const {
     "none", "nonheader", "self", "reducible", "irreducible"
   };
 
-  for (auto node : node_data) {
-    if (node.bb == &f.getFirstBB() || node.back_preds.empty())
-      continue;
-    
+  for (auto n : nodes) {
+    auto &node = node_data[n];
     auto header_bb = node_data[node.header].bb;
-    auto bb_name = bb_dot_name(node.bb->getName());
-    if (header_bb == &f.getFirstBB()) {
-      os << '"' << bb_name << "\"[label=<" << bb_name << "<BR /><FONT POINT" 
-         << "-SIZE=\"10\">" << lheader_names[node.type] 
-         << "</FONT>>][shape=box];\n";
-    } else {
-      os << '"' << bb_name << "\"[label=<" << bb_name << "<BR /><FONT POINT" 
-         << "-SIZE=\"10\">" << lheader_names[node.type] 
-         << "</FONT>>][shape=oval];\n";
-      os << '"' << bb_dot_name(header_bb->getName()) << "\" -> \""
-         << bb_dot_name(node.bb->getName()) << "\";\n";
-    }
+    if (header_bb == &f.getFirstBB() && node.bb == header_bb)
+      continue;
+    auto shape = header_bb == &f.getFirstBB() ? "box" : "oval";
+    os << '"' << header_bb->getName() << "\"[label=<" << header_bb->getName() 
+       << "<BR /><FONT POINT" 
+       << "-SIZE=\"10\">" << lheader_names[node.type] 
+       << "</FONT>>][shape="<< shape <<"];\n";
+    os << '"' << bb_dot_name(header_bb->getName()) << "\" -> \""
+       << bb_dot_name(node.bb->getName()) << "\";\n";
+  
   }
  
   os << "}\n";

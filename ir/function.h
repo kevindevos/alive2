@@ -15,6 +15,7 @@
 #include <string_view>
 #include <tuple>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace smt { class Model; }
@@ -215,11 +216,13 @@ class LoopTree final {
       Vecset() {}
       Vecset(unsigned repr) { add(repr); }
       unsigned repr() { return bb_set[0]; }
-      const auto& getAll() { return bb_set; }
+      const auto& getAll() const { return bb_set; }
       void add(unsigned bb) { bb_set.push_back(bb); }
       void clear() { bb_set.clear(); }
   };
   // "sets" for union and find operations
+  std::vector<unsigned> number; // bb id -> preorder 
+  std::vector<unsigned> nodes; // preorder -> bb id
   std::vector<Vecset*> vecsets;
   std::vector<Vecset> vecsets_data;
   std::unordered_map<unsigned, std::unordered_set<unsigned>> loop_sets; // DEBUG, use vector instead
