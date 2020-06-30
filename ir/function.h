@@ -224,9 +224,13 @@ class LoopTree final {
   // "sets" for union and find operations
   std::vector<unsigned> number; // bb id -> preorder 
   std::vector<unsigned> nodes; // preorder -> bb id
+  std::vector<unsigned> last; // preorder -> preorder
+  // vector of pointers to allow efficient UNION and FIND operations
   std::vector<Vecset*> vecsets;
   std::vector<Vecset> vecsets_data;
-  std::vector<unsigned> loop_header_ids; // id's of bb's that are loop headers
+
+  // id's of bb's that are loop headers
+  std::vector<unsigned> loop_header_ids; 
 
   // bb -> bb id
   std::unordered_map<const BasicBlock*, unsigned> bb_map;

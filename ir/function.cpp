@@ -362,7 +362,6 @@ void LoopTree::vecsetUnion(unsigned from, unsigned to) {
 // Havlak, Paul (1997).
 // Nesting of Reducible and Irreducible Loops.
 void LoopTree::buildLoopTree() {
-  vector<unsigned> last; // preorder -> preorder
   vector<bool> visited; // bb id -> visited
   
   // used in DFS to override sucessor list of a bb when fix_loops added new bbs
@@ -567,12 +566,19 @@ void LoopTree::printDot(std::ostream &os) const {
   for (auto n : nodes) {
     auto &node = node_data[n];
     auto header_bb = node_data[node.header].bb;
+    // show back-edges in red if any
+    for (auto back_pred : node.back_preds) {
+      os << '"' << bb_dot_name(node_data[back_pred].bb->getName()) << "\" -> \""
+         << bb_dot_name(node.bb->getName()) << "\" [color=red];\n";
+    }
+
     if (header_bb == &f.getFirstBB() && node.bb == header_bb)
       continue;
     auto shape = header_bb == &f.getFirstBB() ? "box" : "oval";
-    os << '"' << header_bb->getName() << "\"[label=<" << header_bb->getName() 
+    os << '"' << bb_dot_name(header_bb->getName()) << "\"[label=<" 
+       << bb_dot_name(header_bb->getName())
        << "<BR /><FONT POINT" 
-       << "-SIZE=\"10\">" << lheader_names[node.type] 
+       << "-SIZE=\"10\">" << lheader_names[node_data[node.header].type] 
        << "</FONT>>][shape="<< shape <<"];\n";
     os << '"' << bb_dot_name(header_bb->getName()) << "\" -> \""
        << bb_dot_name(node.bb->getName()) << "\";\n";
