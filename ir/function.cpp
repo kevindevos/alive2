@@ -582,6 +582,10 @@ void LoopTree::printDot(std::ostream &os) const {
        << "</FONT>>][shape="<< shape <<"];\n";
     os << '"' << bb_dot_name(header_bb->getName()) << "\" -> \""
        << bb_dot_name(node.bb->getName()) << "\";\n";
+    os << '"' << bb_dot_name(node.bb->getName()) << "\"[label=<" 
+       << bb_dot_name(node.bb->getName())
+       << "<BR /><FONT POINT-SIZE=\"10\">" << lheader_names[node.type] 
+       << "</FONT>>]"<<";\n";
   }
  
   os << "}\n";
