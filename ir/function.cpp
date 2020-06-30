@@ -508,11 +508,6 @@ void LoopTree::buildLoopTree() {
     }
   }
 
-  // DEBUG print preorder number and creation id per bb
-  for (auto node : nodes) {
-    cout << node_data[node].bb->getName() << "=" << node << ":" << number[node] << endl;
-  }
-
   // c. d. e. 
   // for each node with incoming reducible backedge, builds a set of bbs
   // that represents the loop, sets the loop header and type
@@ -553,9 +548,8 @@ void LoopTree::buildLoopTree() {
         node_data[x].header = w;
         vecsetUnion(x, w);
       }
-      auto &loop_set = loop_sets[w];
-      for (auto el : vecsets[w]->getAll())
-        loop_set.insert(el);
+      node_data[w].loop = vecsets[w]->getAll();
+      loop_header_ids.push_back(w);
     }
     // terminate for loop with descending unsigned index without underflow
     if (!w_num)
@@ -582,7 +576,6 @@ void LoopTree::printDot(std::ostream &os) const {
        << "</FONT>>][shape="<< shape <<"];\n";
     os << '"' << bb_dot_name(header_bb->getName()) << "\" -> \""
        << bb_dot_name(node.bb->getName()) << "\";\n";
-  
   }
  
   os << "}\n";

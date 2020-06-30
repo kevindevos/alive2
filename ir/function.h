@@ -203,6 +203,7 @@ class LoopTree final {
     std::vector<unsigned> back_preds;
     std::vector<unsigned> red_back_in;
     std::vector<unsigned> other_in;
+    std::vector<unsigned> loop;
     unsigned header;
     LHeaderType type;
   };
@@ -225,7 +226,7 @@ class LoopTree final {
   std::vector<unsigned> nodes; // preorder -> bb id
   std::vector<Vecset*> vecsets;
   std::vector<Vecset> vecsets_data;
-  std::unordered_map<unsigned, std::unordered_set<unsigned>> loop_sets; // DEBUG, use vector instead
+  std::vector<unsigned> loop_header_ids; // id's of bb's that are loop headers
 
   // bb -> bb id
   std::unordered_map<const BasicBlock*, unsigned> bb_map;
