@@ -491,6 +491,9 @@ void LoopTree::buildLoopTree() {
     DFS();
   }
 
+  for (auto &n_bb : new_bbs)
+    node_data[bb_map[&n_bb]].is_new = true;
+
   // analyze_loops
   // b. distinguish between back edges and non back edges
   unsigned nodes_size = nodes.size();
@@ -547,7 +550,19 @@ void LoopTree::buildLoopTree() {
         node_data[x].header = w;
         vecsetUnion(x, w);
       }
-      node_data[w].loop = vecsets[w]->getAll();
+      auto &w_loop = node_data[w].loop;
+      bool n_header = false;
+      for (auto lnode : vecsets[w]->getAll()) {
+        w_loop.push_back(lnode);
+        if (lnode != w && !new_bbs.empty() && w_data.is_new && !n_header) {
+          for (auto pred : node_data[lnode].preds) {
+            if (vecsetFind(pred) != w) {
+              w_data.alt_header = lnode;
+              n_header = true;
+            }
+          }
+        }
+      }
       loop_header_ids.push_back(w);
     }
     // terminate for loop with descending unsigned index without underflow
@@ -562,6 +577,18 @@ void LoopTree::printDot(std::ostream &os) const {
   vector<string> lheader_names {
     "none", "nonheader", "self", "reducible", "irreducible"
   };
+
+  // temporary print loop sets
+  for (auto &x : loop_header_ids) {
+    auto &x_data = node_data[x];
+    auto str = x_data.is_new ? (",alt=" + node_data[x_data.alt_header].bb->getName()) : "";
+    cout << bb_dot_name(x_data.bb->getName())
+         << str
+         << " -> (";
+    for (auto el : x_data.loop)
+      cout << bb_dot_name(node_data[el].bb->getName()) << ",";
+    cout << ")" << endl;
+  }
 
   for (auto n : nodes) {
     auto &node = node_data[n];

@@ -205,6 +205,8 @@ class LoopTree final {
     std::vector<unsigned> other_in;
     std::vector<unsigned> loop;
     unsigned header;
+    unsigned alt_header;
+    bool is_new;
     LHeaderType type;
   };
 
@@ -230,7 +232,7 @@ class LoopTree final {
   std::vector<Vecset> vecsets_data;
 
   // id's of bb's that are loop headers
-  std::vector<unsigned> loop_header_ids; 
+  std::vector<unsigned> loop_header_ids;
 
   // bb -> bb id
   std::unordered_map<const BasicBlock*, unsigned> bb_map;
