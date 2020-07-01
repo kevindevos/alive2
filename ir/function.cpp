@@ -557,7 +557,10 @@ void LoopTree::buildLoopTree() {
         if (lnode != w && !new_bbs.empty() && w_data.is_new && !n_header) {
           for (auto pred : node_data[lnode].preds) {
             if (vecsetFind(pred) != w) {
-              w_data.alt_header = lnode;
+              w_data.alt_header = (int) lnode;
+              auto &alt_data = node_data[lnode];
+              alt_data.header = w_data.header;
+              alt_data.type = w_data.type;
               n_header = true;
             }
           }
@@ -592,7 +595,14 @@ void LoopTree::printDot(std::ostream &os) const {
 
   for (auto n : nodes) {
     auto &node = node_data[n];
-    auto header_bb = node_data[node.header].bb;
+    if (node.is_new && node.alt_header != -1) continue;
+    auto header_id = node.header;
+    auto &header_data = node_data[node.header];
+    if (header_data.alt_header != -1) {
+      header_id = header_data.alt_header;
+    }
+    auto header_bb = node_data[header_id].bb;
+
     // show back-edges in red if any
     for (auto back_pred : node.back_preds) {
       os << '"' << bb_dot_name(node_data[back_pred].bb->getName()) << "\" -> \""
@@ -605,7 +615,7 @@ void LoopTree::printDot(std::ostream &os) const {
     os << '"' << bb_dot_name(header_bb->getName()) << "\"[label=<" 
        << bb_dot_name(header_bb->getName())
        << "<BR /><FONT POINT" 
-       << "-SIZE=\"10\">" << lheader_names[node_data[node.header].type] 
+       << "-SIZE=\"10\">" << lheader_names[node_data[header_id].type] 
        << "</FONT>>][shape="<< shape <<"];\n";
     os << '"' << bb_dot_name(header_bb->getName()) << "\" -> \""
        << bb_dot_name(node.bb->getName()) << "\";\n";

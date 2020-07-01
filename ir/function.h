@@ -205,7 +205,7 @@ class LoopTree final {
     std::vector<unsigned> other_in;
     std::vector<unsigned> loop;
     unsigned header;
-    unsigned alt_header;
+    int alt_header = -1;
     bool is_new;
     LHeaderType type;
   };
