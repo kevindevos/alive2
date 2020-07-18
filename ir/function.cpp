@@ -554,13 +554,14 @@ void LoopTree::buildLoopTree() {
       }
       if (node_data[w].is_new)
         loops_with_new_bb.push_back(w);
+      loop_data[node_data[w].header].child_loops.push_back(w);
 
       auto &w_loop_data = loop_data[w];
       bool has_out_exit, has_out_entry, has_in_entry, has_in_exit;
       for (auto lnode : vecsets[w]->getAll()) {
         w_loop_data.nodes.push_back(lnode);
         has_out_exit = has_out_entry = has_in_entry = has_in_exit = false;
-        if (lnode != w) {
+        if (lnode != w && loop_data[lnode].nodes.empty()) {
           auto &lnode_data = node_data[lnode];
           // check predecessors
           for (auto pred : lnode_data.preds) {
@@ -599,12 +600,24 @@ void LoopTree::buildLoopTree() {
     if (!w_loop_data.alternate_headers.empty()) {
       auto &new_w = w_loop_data.alternate_headers.front();
       auto &new_w_loop_data = loop_data[new_w];
-      for (int i = w_loop_data.nodes.size() - 1; i >= 0; ++i) {
+      for (int i = w_loop_data.nodes.size() - 1; i >= 0; --i) {
         auto &node = w_loop_data.nodes[i];
         node_data[node].header = new_w;
         if (node != w)
           new_w_loop_data.nodes.push_back(node);
         w_loop_data.nodes.erase(w_loop_data.nodes.end());
+      }
+      // update pointers for loop nesting tree after header swap
+      for (int i = w_loop_data.child_loops.size() - 1; i >= 0; --i) {
+        new_w_loop_data.child_loops.push_back(w_loop_data.child_loops[i]);
+        w_loop_data.child_loops.erase(w_loop_data.child_loops.end());
+      }
+      auto &hdr_hdr = loop_data[node_data[w].header];
+      auto siz = hdr_hdr.child_loops.size();
+      for (unsigned i = 0; i < siz; ++i) {
+        auto &cl = hdr_hdr.child_loops[i];
+        if (cl == w)
+          cl = new_w;
       }
     }
   }

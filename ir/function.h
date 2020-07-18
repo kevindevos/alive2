@@ -212,6 +212,7 @@ class LoopTree final {
   struct LoopData {
     std::vector<unsigned> nodes;
     std::vector<unsigned> alternate_headers;
+    std::vector<unsigned> child_loops;
   };
 
   // A vector disguised as a set that can be hidden and point to another
