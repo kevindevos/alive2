@@ -403,7 +403,8 @@ void LoopTree::buildLoopTree() {
       auto t_n = bb_id(bb);
       if (!visited[t_n])
         dfs_work_list.push(bb);
-      node_data[t_n].preds.insert(pred);
+      node_data[t_n].preds.push_back(pred);
+      node_data[pred].succs.push_back(t_n);
     };
 
     while (!dfs_work_list.empty()) {
@@ -551,18 +552,38 @@ void LoopTree::buildLoopTree() {
         vecsetUnion(x, w);
       }
       auto &w_loop_data = loop_data[w];
+      bool has_out_exit, has_out_entry, has_in_entry, has_in_exit;
       for (auto lnode : vecsets[w]->getAll()) {
         w_loop_data.nodes.push_back(lnode);
+        has_out_exit = has_out_entry = has_in_entry = has_in_exit = false;
         if (lnode != w) {
-          for (auto pred : node_data[lnode].preds) {
-            if (vecsetFind(pred) != w) {
-              w_loop_data.alternate_headers.push_back(lnode);
-              auto &alt_data = node_data[lnode];
-              alt_data.header = w_data.header;
-              alt_data.type = w_data.type;
-            }
+          auto &lnode_data = node_data[lnode];
+          // check predecessors
+          for (auto pred : lnode_data.preds) {
+            if (vecsetFind(pred) != w)
+              has_out_entry = true; // (pred, lnode) : x not in loop 
+            else
+              has_in_entry = true; // (pred, lnode) : x in loop
+          }
+          // check sucessors
+          for (auto succ : lnode_data.succs) {
+              if (vecsetFind(succ) != w)
+                has_out_exit = true; // (lnode, x) : x not in loop 
+              else
+                has_in_exit = true; // (lnode, x) : x in loop
+          }
+
+          // check if it is a valid loop header
+          // unrolling an invalid header would give no benefit
+          if (has_out_exit && has_out_entry && has_in_entry && has_in_exit) {
+            w_loop_data.alternate_headers.push_back(lnode);
+            auto &alt_data = node_data[lnode];
+            alt_data.header = w_data.header;
+            alt_data.type = w_data.type;
           }
         }
+
+
       }
       loop_header_ids.push_back(w);
     }
