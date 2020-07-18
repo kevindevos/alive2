@@ -517,6 +517,7 @@ void LoopTree::buildLoopTree() {
   node_data[0].header = 0;
   unordered_set<unsigned> P;
   stack<unsigned> work_list;
+  vector<unsigned> loops_with_new_bb;
   for (unsigned w_num = nodes_size - 1; ; --w_num) {
     auto &w = nodes[w_num];
     P.clear();
@@ -551,6 +552,9 @@ void LoopTree::buildLoopTree() {
         node_data[x].header = w;
         vecsetUnion(x, w);
       }
+      if (node_data[w].is_new)
+        loops_with_new_bb.push_back(w);
+
       auto &w_loop_data = loop_data[w];
       bool has_out_exit, has_out_entry, has_in_entry, has_in_exit;
       for (auto lnode : vecsets[w]->getAll()) {
@@ -567,10 +571,10 @@ void LoopTree::buildLoopTree() {
           }
           // check sucessors
           for (auto succ : lnode_data.succs) {
-              if (vecsetFind(succ) != w)
-                has_out_exit = true; // (lnode, x) : x not in loop 
-              else
-                has_in_exit = true; // (lnode, x) : x in loop
+            if (vecsetFind(succ) != w)
+              has_out_exit = true; // (lnode, x) : x not in loop 
+            else
+              has_in_exit = true; // (lnode, x) : x in loop
           }
 
           // check if it is a valid loop header
@@ -582,15 +586,29 @@ void LoopTree::buildLoopTree() {
             alt_data.type = w_data.type;
           }
         }
-
-
       }
       loop_header_ids.push_back(w);
     }
-    // terminate for loop with descending unsigned index without underflow
     if (!w_num)
       break;
   }
+
+  // update header for loops with a new bb inserted in fix_loops
+  for (auto w : loops_with_new_bb) {
+    auto &w_loop_data = loop_data[w];
+    if (!w_loop_data.alternate_headers.empty()) {
+      auto &new_w = w_loop_data.alternate_headers.front();
+      auto &new_w_loop_data = loop_data[new_w];
+      for (int i = w_loop_data.nodes.size() - 1; i >= 0; ++i) {
+        auto &node = w_loop_data.nodes[i];
+        node_data[node].header = new_w;
+        if (node != w)
+          new_w_loop_data.nodes.push_back(node);
+        w_loop_data.nodes.erase(w_loop_data.nodes.end());
+      }
+    }
+  }
+  
 }
 
 void LoopTree::printDot(std::ostream &os) const {
