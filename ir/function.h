@@ -252,6 +252,10 @@ class LoopTree final {
   void buildLoopTree();
 public:
   LoopTree(Function &f, CFG &cfg) : f(f), cfg(cfg) { buildLoopTree(); }
+  std::vector<const BasicBlock*> getLoopset(const BasicBlock *bb);
+  std::vector<std::pair<const BasicBlock*, std::vector<const BasicBlock*>>>
+  getLoopsets();
+  std::vector<const BasicBlock*> getAltHeaders(const BasicBlock *bb);
   void printDot(std::ostream &os) const;
 };
 

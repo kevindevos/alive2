@@ -646,6 +646,33 @@ void LoopTree::printDot(std::ostream &os) const {
   os << "}\n";
 }
 
+vector<const BasicBlock*> LoopTree::getLoopset(const BasicBlock *bb) {
+  vector<const BasicBlock*> loopset;
+  for (auto n : loop_data[bb_map[bb]].nodes)
+    loopset.push_back(node_data[n].bb);
+  return loopset;
+}
+
+vector<pair<const BasicBlock*, vector<const BasicBlock*>>>
+LoopTree::getLoopsets() {
+  vector<pair<const BasicBlock*, vector<const BasicBlock*>>> loopsets;
+  for (auto lhdr : loop_header_ids) {
+    auto &loopset = loopsets.emplace_back(node_data[lhdr].bb, 
+                                         initializer_list<const BasicBlock*>{});
+    for (auto n : loop_data[lhdr].nodes)
+      loopset.second.push_back(node_data[n].bb);
+  }
+  return loopsets;
+}
+
+
+vector<const BasicBlock*> LoopTree::getAltHeaders(const BasicBlock *bb) {
+  vector<const BasicBlock*> alt_headers;
+  for (auto n : loop_data[bb_map[bb]].alternate_headers)
+    alt_headers.push_back(node_data[n].bb);
+  return alt_headers;
+}
+
 // Relies on Alive's top_sort run during llvm2alive conversion in order to
 // traverse the cfg in reverse postorder to build dominators.
 void DomTree::buildDominators() {
