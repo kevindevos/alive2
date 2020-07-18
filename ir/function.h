@@ -203,11 +203,14 @@ class LoopTree final {
     std::vector<unsigned> back_preds;
     std::vector<unsigned> red_back_in;
     std::vector<unsigned> other_in;
-    std::vector<unsigned> loop;
     unsigned header;
-    int alt_header = -1;
-    bool is_new;
     LHeaderType type;
+    bool is_new;
+  };
+
+  struct LoopData {
+    std::vector<unsigned> nodes;
+    std::vector<unsigned> alternate_headers;
   };
 
   // A vector disguised as a set that can be hidden and point to another
@@ -236,6 +239,8 @@ class LoopTree final {
 
   // bb -> bb id
   std::unordered_map<const BasicBlock*, unsigned> bb_map;
+  // bb id of loop header -> loop data
+  std::vector<LoopData> loop_data;
 
   // new_bbs holds bbs added in fix_loops
   std::vector<BasicBlock> new_bbs; 

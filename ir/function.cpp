@@ -482,7 +482,6 @@ void LoopTree::buildLoopTree() {
   // if new bbs were created in fix_loops, rerun DFS for updated preorder
   // numbering
   if (!new_bbs.empty()) {
-    // TODO group data structures together to reduce resize complexity
     visited.clear();
     bb_map.clear();
     node_data.clear();
@@ -513,6 +512,7 @@ void LoopTree::buildLoopTree() {
   // c. d. e. 
   // for each node with incoming reducible backedge, builds a set of bbs
   // that represents the loop, sets the loop header and type
+  loop_data.resize(nodes_size);
   node_data[0].header = 0;
   unordered_set<unsigned> P;
   stack<unsigned> work_list;
@@ -550,18 +550,16 @@ void LoopTree::buildLoopTree() {
         node_data[x].header = w;
         vecsetUnion(x, w);
       }
-      auto &w_loop = node_data[w].loop;
-      bool n_header = false;
+      auto &w_loop_data = loop_data[w];
       for (auto lnode : vecsets[w]->getAll()) {
-        w_loop.push_back(lnode);
-        if (lnode != w && !new_bbs.empty() && w_data.is_new && !n_header) {
+        w_loop_data.nodes.push_back(lnode);
+        if (lnode != w) {
           for (auto pred : node_data[lnode].preds) {
             if (vecsetFind(pred) != w) {
-              w_data.alt_header = (int) lnode;
+              w_loop_data.alternate_headers.push_back(lnode);
               auto &alt_data = node_data[lnode];
               alt_data.header = w_data.header;
               alt_data.type = w_data.type;
-              n_header = true;
             }
           }
         }
@@ -582,32 +580,31 @@ void LoopTree::printDot(std::ostream &os) const {
   };
 
   // temporary print loop sets
-  for (auto &x : loop_header_ids) {
-    auto &x_data = node_data[x];
-    auto str = x_data.is_new ? (",alt=" + node_data[x_data.alt_header].bb->getName()) : "";
-    cout << bb_dot_name(x_data.bb->getName())
-         << str
-         << " -> (";
-    for (auto el : x_data.loop)
-      cout << bb_dot_name(node_data[el].bb->getName()) << ",";
-    cout << ")" << endl;
+  for (auto &n : loop_header_ids) {
+    auto &n_loop_data = loop_data[n];
+    auto &n_data = node_data[n];
+    auto bb = n;
+    if (n_data.is_new)
+      bb = n_loop_data.alternate_headers.front();
+
+    cout << bb_dot_name(node_data[bb].bb->getName()) << " -> (";
+    for (auto el : n_loop_data.nodes) {
+      cout << bb_dot_name(node_data[el].bb->getName());
+      if (el != loop_data[n].nodes.back())
+        cout << ",";
+    }
+    cout << ")" << '\n';
   }
 
   for (auto n : nodes) {
     auto &node = node_data[n];
-    if (node.is_new && node.alt_header != -1) continue;
+    auto &node_loop_data = loop_data[n];
+    if (node.is_new && !node_loop_data.alternate_headers.empty()) continue;
     auto header_id = node.header;
-    auto &header_data = node_data[node.header];
-    if (header_data.alt_header != -1) {
-      header_id = header_data.alt_header;
-    }
+    auto &header_loop_data = loop_data[node.header];
+    if (!header_loop_data.alternate_headers.empty())
+      header_id = header_loop_data.alternate_headers.front();
     auto header_bb = node_data[header_id].bb;
-
-    // show back-edges in red if any
-    for (auto back_pred : node.back_preds) {
-      os << '"' << bb_dot_name(node_data[back_pred].bb->getName()) << "\" -> \""
-         << bb_dot_name(node.bb->getName()) << "\" [color=red];\n";
-    }
 
     if (header_bb == &f.getFirstBB() && node.bb == header_bb)
       continue;
