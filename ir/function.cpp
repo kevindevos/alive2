@@ -550,11 +550,13 @@ void LoopTree::buildLoopTree() {
     if (!P.empty()) {
       for (auto x : P) {
         node_data[x].header = w;
+        if (!loop_data[x].nodes.empty())
+          loop_data[w].child_loops.push_back(x);
         vecsetUnion(x, w);
       }
+     
       if (node_data[w].is_new)
         loops_with_new_bb.push_back(w);
-      loop_data[node_data[w].header].child_loops.push_back(w);
 
       auto &w_loop_data = loop_data[w];
       bool has_out_exit, has_out_entry, has_in_entry, has_in_exit;
@@ -621,7 +623,14 @@ void LoopTree::buildLoopTree() {
       }
     }
   }
-  
+}
+
+vector<LoopTree::NodeData>* LoopTree::getNodeData() {
+  return &node_data;
+}
+
+std::vector<LoopTree::LoopData>* LoopTree::getLoopData() {
+  return &loop_data;
 }
 
 void LoopTree::printDot(std::ostream &os) const {
@@ -677,32 +686,6 @@ void LoopTree::printDot(std::ostream &os) const {
   os << "}\n";
 }
 
-vector<const BasicBlock*> LoopTree::getLoopset(const BasicBlock *bb) {
-  vector<const BasicBlock*> loopset;
-  for (auto n : loop_data[bb_map[bb]].nodes)
-    loopset.push_back(node_data[n].bb);
-  return loopset;
-}
-
-vector<pair<const BasicBlock*, vector<const BasicBlock*>>>
-LoopTree::getLoopsets() {
-  vector<pair<const BasicBlock*, vector<const BasicBlock*>>> loopsets;
-  for (auto lhdr : loop_header_ids) {
-    auto &loopset = loopsets.emplace_back(node_data[lhdr].bb, 
-                                         initializer_list<const BasicBlock*>{});
-    for (auto n : loop_data[lhdr].nodes)
-      loopset.second.push_back(node_data[n].bb);
-  }
-  return loopsets;
-}
-
-
-vector<const BasicBlock*> LoopTree::getAltHeaders(const BasicBlock *bb) {
-  vector<const BasicBlock*> alt_headers;
-  for (auto n : loop_data[bb_map[bb]].alternate_headers)
-    alt_headers.push_back(node_data[n].bb);
-  return alt_headers;
-}
 
 // Relies on Alive's top_sort run during llvm2alive conversion in order to
 // traverse the cfg in reverse postorder to build dominators.
