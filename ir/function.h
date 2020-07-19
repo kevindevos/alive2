@@ -210,6 +210,7 @@ class LoopTree final {
   };
 
   struct LoopData {
+    unsigned node_id;
     std::vector<unsigned> nodes;
     std::vector<unsigned> alternate_headers;
     std::vector<unsigned> child_loops;
@@ -253,10 +254,8 @@ class LoopTree final {
   void buildLoopTree();
 public:
   LoopTree(Function &f, CFG &cfg) : f(f), cfg(cfg) { buildLoopTree(); }
-  std::vector<const BasicBlock*> getLoopset(const BasicBlock *bb);
-  std::vector<std::pair<const BasicBlock*, std::vector<const BasicBlock*>>>
-  getLoopsets();
-  std::vector<const BasicBlock*> getAltHeaders(const BasicBlock *bb);
+  std::vector<NodeData>* getNodeData();
+  std::vector<LoopData>* getLoopData();
   void printDot(std::ostream &os) const;
 };
 
