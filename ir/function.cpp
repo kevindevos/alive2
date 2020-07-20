@@ -399,12 +399,12 @@ void LoopTree::buildLoopTree() {
     dfs_work_list.push(entry);
     unsigned current = START_BB_ID;
 
-    auto try_push_worklist = [&](const BasicBlock *bb, unsigned pred) {
+    auto try_push_worklist = [&](const BasicBlock *bb, unsigned pred, auto c) {
       auto t_n = bb_id(bb);
       if (!visited[t_n])
         dfs_work_list.push(bb);
       node_data[t_n].preds.push_back(pred);
-      node_data[pred].succs.push_back(t_n);
+      node_data[pred].succs.emplace_back(c, t_n);
     };
 
     while (!dfs_work_list.empty()) {
@@ -413,7 +413,7 @@ void LoopTree::buildLoopTree() {
       int n = bb_id(cur_bb);
       nodes[current] = n;
       auto &cur_node_data = node_data[n];
-      cur_node_data.bb = cur_bb;
+      cur_node_data.bb = const_cast<BasicBlock*>(cur_bb);
       
       if (!visited[n]) {
         visited[n] = true;
@@ -427,13 +427,15 @@ void LoopTree::buildLoopTree() {
         if (succ_overr.empty()) {
           if (auto instr = dynamic_cast<const JumpInstr*>(&cur_bb->back())) {
             auto tgt_it = const_cast<JumpInstr*>(instr)->targets();
-            for (auto I = tgt_it.begin(), E = tgt_it.end(); I != E; ++I)
-              try_push_worklist(&(*I), n);
+            for (auto I = tgt_it.begin(), E = tgt_it.end(); I != E; ++I) {
+              auto [cond, bb] = I.get();
+              try_push_worklist(&bb, n, cond);
+            }
           }
         } else {
           // if new bbs were added from fix_loops, use succ_overr instead
           for (auto succ : succ_overr)
-            try_push_worklist(succ, n);
+            try_push_worklist(succ, n, nullptr);
         }
       } else {
         last[number[n]] = current - 1;
@@ -550,6 +552,7 @@ void LoopTree::buildLoopTree() {
     if (!P.empty()) {
       for (auto x : P) {
         node_data[x].header = w;
+        node_data[x].containing_loops.push_back(w);
         if (!loop_data[x].nodes.empty())
           loop_data[w].child_loops.push_back(x);
         vecsetUnion(x, w);
@@ -573,7 +576,8 @@ void LoopTree::buildLoopTree() {
               has_in_entry = true; // (pred, lnode) : x in loop
           }
           // check sucessors
-          for (auto succ : lnode_data.succs) {
+          for (auto [cond, succ] : lnode_data.succs) {
+            (void)cond;
             if (vecsetFind(succ) != w)
               has_out_exit = true; // (lnode, x) : x not in loop 
             else
@@ -581,7 +585,6 @@ void LoopTree::buildLoopTree() {
           }
 
           // check if it is a valid loop header
-          // unrolling an invalid header would give no benefit
           if (has_out_exit && has_out_entry && has_in_entry && has_in_exit) {
             w_loop_data.alternate_headers.push_back(lnode);
             auto &alt_data = node_data[lnode];
@@ -599,14 +602,19 @@ void LoopTree::buildLoopTree() {
   // update header for loops with a new bb inserted in fix_loops
   for (auto w : loops_with_new_bb) {
     auto &w_loop_data = loop_data[w];
+    auto w_old_header = node_data[w].header;
+    // if an alternative header exists choose a new one
     if (!w_loop_data.alternate_headers.empty()) {
       auto &new_w = w_loop_data.alternate_headers.front();
       auto &new_w_loop_data = loop_data[new_w];
+      new_w_loop_data.nodes.push_back(new_w);
+      node_data[new_w].header = w_old_header;
       for (int i = w_loop_data.nodes.size() - 1; i >= 0; --i) {
         auto &node = w_loop_data.nodes[i];
-        node_data[node].header = new_w;
-        if (node != w)
+        if (node != new_w) {
+          node_data[node].header = new_w;
           new_w_loop_data.nodes.push_back(node);
+        }
         w_loop_data.nodes.erase(w_loop_data.nodes.end());
       }
       // update pointers for loop nesting tree after header swap
@@ -625,12 +633,12 @@ void LoopTree::buildLoopTree() {
   }
 }
 
-vector<LoopTree::NodeData>* LoopTree::getNodeData() {
-  return &node_data;
+vector<LoopTree::NodeData>& LoopTree::getNodeData() {
+  return node_data;
 }
 
-std::vector<LoopTree::LoopData>* LoopTree::getLoopData() {
-  return &loop_data;
+std::vector<LoopTree::LoopData>& LoopTree::getLoopData() {
+  return loop_data;
 }
 
 void LoopTree::printDot(std::ostream &os) const {
@@ -685,7 +693,6 @@ void LoopTree::printDot(std::ostream &os) const {
  
   os << "}\n";
 }
-
 
 // Relies on Alive's top_sort run during llvm2alive conversion in order to
 // traverse the cfg in reverse postorder to build dominators.
