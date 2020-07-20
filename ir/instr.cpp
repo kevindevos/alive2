@@ -1862,10 +1862,30 @@ unique_ptr<Instr> Phi::dup(const string &suffix) const {
 
 const BasicBlock& JumpInstr::target_iterator::operator*() const {
   if (auto br = dynamic_cast<Branch*>(instr))
-    return idx == 0 ? br->getTrue() : *br->getFalse();
+    return idx == 0 ? *br->getTrue() : *br->getFalse();
 
   if (auto sw = dynamic_cast<Switch*>(instr))
-    return idx == 0 ? sw->getDefault() : sw->getTarget(idx-1).second;
+    return idx == 0 ? *sw->getDefault() : *sw->getTarget(idx-1).second;
+
+  UNREACHABLE();
+}
+
+pair<Value*, const BasicBlock&> JumpInstr::target_iterator::get() const {
+  if (auto br = dynamic_cast<Branch*>(instr)) {
+    if (idx == 0)
+      return { &br->getCond(), *br->getTrue() };
+    else
+      return { nullptr, *br->getFalse() };
+  }
+
+  if (auto sw = dynamic_cast<Switch*>(instr)) {
+    if (idx == 0) {
+      return { &sw->getDefaultValue(), *sw->getDefault() };
+    } else {
+      auto tgt = sw->getTarget(idx-1);
+      return { tgt.first,  *tgt.second };
+    }
+  }
 
   UNREACHABLE();
 }
@@ -1882,6 +1902,42 @@ JumpInstr::target_iterator JumpInstr::it_helper::end() const {
   return { instr, idx };
 }
 
+void JumpInstr::clearTargets() {
+  if (auto br = dynamic_cast<Branch*>(this)) {
+    br->clearTargets();
+  } else if (auto sw = dynamic_cast<Switch*>(this)) {
+    sw->clearTargets();
+  }
+}
+
+void JumpInstr::addTarget(Value &val, BasicBlock &target) {
+  if (auto br = dynamic_cast<Branch*>(this)) {
+    if (!br->getTrue())
+      br->setTrue(val, target);
+    else
+      br->setFalse(target);
+  } else if (auto sw = dynamic_cast<Switch*>(this)) {
+    if (!sw->getDefault())
+      sw->setDefaultTarget(val, target);
+    else 
+      sw->addTarget(val, target);
+    
+  }
+}
+
+void Branch::setTrue(Value &val, BasicBlock &target) {
+  cond = &val;
+  dst_true = &target;
+}
+
+void Branch::setFalse(BasicBlock &target) {
+  dst_false = &target;
+}
+
+void Branch::clearTargets() {
+  cond = nullptr;
+  dst_true = dst_false = nullptr;
+}
 
 vector<Value*> Branch::operands() const {
   if (cond)
@@ -1897,7 +1953,7 @@ void Branch::print(ostream &os) const {
   os << "br ";
   if (cond)
     os << *cond << ", ";
-  os << "label " << dst_true.getName();
+  os << "label " << dst_true->getName();
   if (dst_false)
     os << ", label " << dst_false->getName();
 }
@@ -1930,9 +1986,9 @@ StateValue Branch::toSMT(State &s) const {
     auto [cond_val, not_undef] = jump_undef_condition(s, *cond, c.value);
     s.addUB(c.non_poison);
     s.addUB(move(not_undef));
-    s.addCondJump(cond_val, dst_true, *dst_false);
+    s.addCondJump(cond_val, *dst_true, *dst_false);
   } else {
-    s.addJump(dst_true);
+    s.addJump(*dst_true);
   }
   return {};
 }
@@ -1945,13 +2001,23 @@ expr Branch::getTypeConstraints(const Function &f) const {
 
 unique_ptr<Instr> Branch::dup(const string &suffix) const {
   if (dst_false)
-    return make_unique<Branch>(*cond, dst_true, *dst_false);
-  return make_unique<Branch>(dst_true);
+    return make_unique<Branch>(*cond, *dst_true, *dst_false);
+  return make_unique<Branch>(*dst_true);
 }
 
+void Switch::setDefaultTarget(Value &val, BasicBlock &target) {
+  value = &val;
+  default_target = &target;
+}
 
-void Switch::addTarget(Value &val, const BasicBlock &target) {
-  targets.emplace_back(&val, target);
+void Switch::addTarget(Value &val, BasicBlock &target) {
+  targets.emplace_back(&val, &target);
+}
+
+void Switch::clearTargets() {
+  value = nullptr;
+  default_target = nullptr;
+  targets.clear();
 }
 
 vector<Value*> Switch::operands() const {
@@ -1972,9 +2038,9 @@ void Switch::rauw(const Value &what, Value &with) {
 }
 
 void Switch::print(ostream &os) const {
-  os << "switch " << *value << ", label " << default_target.getName() << " [\n";
+  os << "switch " << *value << ", label " << default_target->getName() << " [\n";
   for (auto &[val, target] : targets) {
-    os << "    " << *val << ", label " << target.getName() << '\n';
+    os << "    " << *val << ", label " << target->getName() << '\n';
   }
   os << "  ]";
 }
@@ -1992,10 +2058,10 @@ StateValue Switch::toSMT(State &s) const {
     assert(target.non_poison.isTrue());
     expr cmp = cond_val == target.value;
     default_cond &= !cmp;
-    s.addJump(move(cmp), bb);
+    s.addJump(move(cmp), *bb);
   }
 
-  s.addJump(move(default_cond), default_target);
+  s.addJump(move(default_cond), *default_target);
   s.addUB(expr(false));
   return {};
 }
@@ -2009,9 +2075,9 @@ expr Switch::getTypeConstraints(const Function &f) const {
 }
 
 unique_ptr<Instr> Switch::dup(const string &suffix) const {
-  auto sw = make_unique<Switch>(*value, default_target);
+  auto sw = make_unique<Switch>(*value, *default_target);
   for (auto &[value_cond, bb] : targets) {
-    sw->addTarget(*value_cond, bb);
+    sw->addTarget(*value_cond, *bb);
   }
   return sw;
 }

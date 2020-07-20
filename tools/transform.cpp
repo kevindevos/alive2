@@ -16,6 +16,7 @@
 #include <map>
 #include <set>
 #include <sstream>
+#include <stack>
 
 using namespace IR;
 using namespace smt;
@@ -1089,6 +1090,141 @@ void Transform::preprocess() {
       }
     }
   }
+
+  // // INPUT : unroll factor : where to get it from?
+  // auto k = 1;
+
+  // // Loop unrolling
+  // for (auto fn : { &src, &tgt }) {
+  //   CFG cfg(*fn);
+  //   LoopTree loop_tree(*fn, cfg);
+  //   auto node_data = loop_tree.getNodeData();
+  //   auto loop_data = loop_tree.getLoopData();
+  //   vector<unique_ptr<BasicBlock>> duped_bbs;
+  //   vector<unsigned> id_duped_bbs;
+
+  //   auto dupe_bb = [&](unsigned bb) {
+  //     auto &bb_data = node_data[bb];
+  //     auto &dupe_count = bb_data.dupe_counter;
+  //     auto bb_ptr = bb_data.bb->dup(dupe_count++);
+  //     // remove any edges to and from bb
+  //     // TODO
+      
+  //     auto id = node_data.size();
+  //     id_duped_bbs.push_back(id);
+  //     duped_bbs.push_back(move(bb_ptr));
+  //     node_data.emplace_back();
+  //     bb_data.latest_dupe = id;
+  //     node_data.back().bb = &duped_bbs.back().get();
+  //     return id;
+  //   };
+
+  //   bool in_loop = [&](unsigned bb, unsigned loop_header) {
+  //     for (auto loop : node_data[bb].containing_loops)
+  //       if (loop == loop_header)
+  //         return true;
+  //     return false;
+  //   };
+
+  //   auto duplicate_header = [&](unsigned header, unsigned n_first) {
+  //     auto duped_header = dupe_bb(header);
+  //     auto &duped_header_data = node_data[duped_header];
+
+  //     auto &n_first_data = node_data[n_first];
+  //     for (auto succ : n_first_data.succs) {
+  //       if (!in_loop(succ, header)) {
+  //         duped_header_data.succs.push_back(succ);
+  //         auto instr = (JumpInstr*) &duped_header_data.bb->back();
+  //         instr->clearTargets();
+  //         // add target, instr -> succ
+  //       }
+  //     }
+  //     for (auto pred : n_first_data.preds) {
+  //       if (in_loop(pred, header)) {
+  //         auto pred_ = node_data[pred].latest_dupe;
+  //         if (!pred_) pred_ = pred;
+
+  //         // edge.source' = getBBEquivIn(edge.source, n)
+  //         // create edge pred_ -> header
+  //         // add to node_data
+  //       }
+  //     }
+  //     return duped_header;
+  //   };
+
+  //   auto duplicate_body = [&](unsigned header) {
+  //     vector<unsigned> duped_body;
+  //     auto &loop = loop_data[header];
+  //     auto loop_size = loop.size();
+  //     for (int i = 1; i < loop_size; ++i) {
+  //       duped_body.push_back(dupe_bb(loop.nodes[i]));
+  //     }
+  //     for (auto bb : loop.nodes) {
+  //       auto &bb_data = node_data[bb];
+  //       for (auto dst : bb_data.succs) {
+  //         bool is_back_edge; // check with topological ordering index < index
+  //         if (!is_back_edge) {
+  //           auto bb_ = bb_data.latest_dupe;
+  //           if (!bb_) bb_ = bb;
+  //           auto dst_latest_dupe = node_data[dst].latest_dupe;
+  //           if (!dst_latest_dupe) dst_latest_dupe = dst;
+            
+  //           auto dst_ = in_loop(dst, header) ? dst_latest_dupe : dst;
+  //           // TODO create edge bb' -> edge.dst'
+  //         }
+  //       }
+  //     }
+
+  //     return body;
+  //   };
+
+  //   vector<unsigned> visited;
+  //   stack<unsigned> S;
+  //   S.push(0);
+  //   visited.resize(loop_data.size());
+
+  //   while (!S.empty()) {
+  //     auto n = S.top();
+  //     S.pop();
+
+  //     if (!visited[n]) {
+  //       S.push(n);
+  //       for (auto child_loop : loop_data[n].child_loops)
+  //         S.push(child_loop);
+  //     } else {
+  //       // ignore loops not marked reducible and irreducible
+  //       auto n_type = node_data[n].type;
+  //       if (n_type != LoopTree::LHeaderType::reducible &&
+  //           n_type != LoopTree::LHeaderType::irreducible)
+  //         continue;
+        
+  //       unsigned n_first = n;
+  //       unsigned n_new = duplicate_header(n, n_first);
+  //       auto n_prev = n_new;
+  //       for (int i = 1; i < k; ++i) {
+  //         auto b_new = duplicate_body(n_prev);
+  //         n_new = duplicate_header(n_prev, n_first);
+
+  //         for (auto dst : node_data[n_first].succs) {
+  //           if (in_loop(dst, n_first)) {
+  //             auto dst_ = node_data[dst].latest_dupe;
+  //             if (!dst_) dst_ = dst;
+  //             // create edge n_prev -> dst_ // dont forget both local and BB edges
+  //           }
+  //         }
+  //         n_prev = n_new;
+  //       }
+
+  //       // X for each loop containing this loop
+  //       // X   for each new bb added
+  //       // X     add new bb to body of containing loop
+  //       // may be better to do this the other way around, 
+  //       // on loop, check if has inner loops, if so, add the bbs duped there
+  //       // to current loop, this prevents having to iterate all loops at once
+  //       // and easier to code
+  //     }
+  //   }
+  // }
 }
 
 void Transform::print(ostream &os, const TransformPrintOpts &opt) const {
