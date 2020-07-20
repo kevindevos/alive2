@@ -190,23 +190,25 @@ public:
 };
 
 class LoopTree final {
-  Function &f;
-  CFG cfg;
-
+public:
   enum LHeaderType { 
     none = 0, nonheader = 1, self = 2, reducible = 3, irreducible = 4 
   };
+
   struct NodeData {
-    const BasicBlock *bb;
+    BasicBlock *bb;
     std::vector<unsigned> preds; // either back or non-back preds
-    std::vector<unsigned> succs;
+    std::vector<std::pair<Value*, unsigned>> succs;
     std::vector<unsigned> non_back_preds;
     std::vector<unsigned> back_preds;
     std::vector<unsigned> red_back_in;
     std::vector<unsigned> other_in;
+    std::vector<unsigned> containing_loops;
     unsigned header;
     LHeaderType type;
     bool is_new;
+    std::optional<unsigned> latest_dupe;
+    unsigned dupe_counter;
   };
 
   struct LoopData {
@@ -215,6 +217,9 @@ class LoopTree final {
     std::vector<unsigned> alternate_headers;
     std::vector<unsigned> child_loops;
   };
+private:
+  Function &f;
+  CFG cfg;
 
   // A vector disguised as a set that can be hidden and point to another
   // vecset for convenient union operations
@@ -230,7 +235,7 @@ class LoopTree final {
       void clear() { bb_set.clear(); }
   };
   // "sets" for union and find operations
-  std::vector<unsigned> number; // bb id -> preorder 
+  std::vector<unsigned> number; // bb id ->  preorder 
   std::vector<unsigned> nodes; // preorder -> bb id
   std::vector<unsigned> last; // preorder -> preorder
   // vector of pointers to allow efficient UNION and FIND operations
@@ -254,8 +259,8 @@ class LoopTree final {
   void buildLoopTree();
 public:
   LoopTree(Function &f, CFG &cfg) : f(f), cfg(cfg) { buildLoopTree(); }
-  std::vector<NodeData>* getNodeData();
-  std::vector<LoopData>* getLoopData();
+  std::vector<NodeData>& getNodeData();
+  std::vector<LoopData>& getLoopData();
   void printDot(std::ostream &os) const;
 };
 
