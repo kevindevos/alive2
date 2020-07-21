@@ -104,6 +104,12 @@ const BasicBlock* Function::getBBIfExists(std::string_view name) const {
   return I != BBs.end() ? &I->second : nullptr;
 }
 
+BasicBlock* Function::addBB(BasicBlock &&bb) {
+  auto [b, inserted] = BBs.emplace(bb.getName(), bb);
+  BB_order.push_back(&b->second);
+  return &b->second;
+}
+
 void Function::removeBB(BasicBlock &BB) {
   BBs.erase(BB.getName());
 
@@ -403,7 +409,8 @@ void LoopTree::buildLoopTree() {
       auto t_n = bb_id(bb);
       if (!visited[t_n])
         dfs_work_list.push(bb);
-      node_data[t_n].preds.push_back(pred);
+      node_data[t_n].id = t_n;
+      node_data[t_n].preds.emplace_back(c, pred);
       node_data[pred].succs.emplace_back(c, t_n);
     };
 
@@ -452,7 +459,8 @@ void LoopTree::buildLoopTree() {
   for (unsigned w_num = 0; w_num < nodes.size(); ++w_num) {
     auto &w = nodes[w_num];
     auto &w_data = node_data[w];
-    for (auto &v : w_data.preds) {
+    for (auto &[c, v] : w_data.preds) {
+      (void)c;
       if (w_num <= number[v]) 
         w_data.red_back_in.push_back(v);
       else
@@ -504,7 +512,8 @@ void LoopTree::buildLoopTree() {
     auto &w_data = node_data[w];
     w_data.header = 0;
     w_data.type = LHeaderType::nonheader;
-    for (auto &v : w_data.preds) {
+    for (auto &[c, v] : w_data.preds) {
+      (void)c;
       if (isAncestor(w_num, number[v]))
         w_data.back_preds.push_back(v);
       else
@@ -524,7 +533,8 @@ void LoopTree::buildLoopTree() {
     auto &w = nodes[w_num];
     P.clear();
     auto &w_data = node_data[w];
-    for (auto &v : w_data.back_preds) {
+    for (auto &[c, v] : w_data.back_preds) {
+      (void)c;
       if (v != w) {
         auto v_repr = vecsetFind(v);
         P.insert(v_repr);
@@ -569,15 +579,16 @@ void LoopTree::buildLoopTree() {
         if (lnode != w && loop_data[lnode].nodes.empty()) {
           auto &lnode_data = node_data[lnode];
           // check predecessors
-          for (auto pred : lnode_data.preds) {
+          for (auto &[c, pred] : lnode_data.preds) {
+            (void)c;
             if (vecsetFind(pred) != w)
               has_out_entry = true; // (pred, lnode) : x not in loop 
             else
               has_in_entry = true; // (pred, lnode) : x in loop
           }
           // check sucessors
-          for (auto [cond, succ] : lnode_data.succs) {
-            (void)cond;
+          for (auto [c, succ] : lnode_data.succs) {
+            (void)c;
             if (vecsetFind(succ) != w)
               has_out_exit = true; // (lnode, x) : x not in loop 
             else
@@ -619,14 +630,6 @@ void LoopTree::buildLoopTree() {
       }
     }
   }
-}
-
-vector<LoopTree::NodeData>& LoopTree::getNodeData() {
-  return node_data;
-}
-
-std::vector<LoopTree::LoopData>& LoopTree::getLoopData() {
-  return loop_data;
 }
 
 void LoopTree::printDot(std::ostream &os) const {
