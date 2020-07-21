@@ -213,7 +213,8 @@ public:
     LHeaderType type;
     bool is_new;
     unsigned dupe_counter = 0;
-    unsigned latestDupe() { return !latest_dupe ? id : *latest_dupe; }
+    unsigned latestDupe(unsigned loop_id);
+    int latest_dupe_loop = -1;
   };
 
   struct LoopData {

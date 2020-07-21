@@ -1102,9 +1102,14 @@ void Transform::preprocess() {
     vector<BasicBlock*> duped_bbs;
     vector<unsigned> id_duped_bbs;
 
-    auto dupe_bb = [&](unsigned bb) {
+    auto dupe_bb = [&](unsigned bb, unsigned loop) {
       auto &bb_data = lt.node_data[bb];
       bb_data.id = bb;
+      
+      // reset latest dupe if we are unrolling a new loop, so previous latest
+      // info is correct
+      bb_data.latestDupe();
+      
       auto &dupe_count = bb_data.dupe_counter;
       auto bb_ptr = bb_data.bb->dup("#"+dupe_count++);
       ((JumpInstr*) &bb_ptr->back())->clearTargets();
@@ -1159,13 +1164,10 @@ void Transform::preprocess() {
 
 
     };
-    // TODO replacing back edges, but keeping them as reference is another
-    // difficulty, since deleting back edges will prevent subsequent k iterations
-    // from being able to reason on back-edges
 
     auto duplicate_header = [&](unsigned header, unsigned n_first,
                                 unsigned n_prev) {
-      auto duped_header = dupe_bb(header);
+      auto duped_header = dupe_bb(header, header);
       auto &duped_header_data = lt.node_data[duped_header];
       ((JumpInstr*) &duped_header_data.bb->back())->clearTargets();
 
@@ -1175,11 +1177,6 @@ void Transform::preprocess() {
           add_edge(c, duped_header, succ);
       }
       
-      // TODO latestDupe() should reset if you call it for a new loop layer
-      // ex: calling latestDupe on the first inner loop is fine
-      // but moving to the loop that contains this inner one, should reset 
-      // the latestDupe, and dupe counter, so that they give those in "n_first"
-
       for (auto &[c, pred] : n_first_data.preds) {
         auto pred_ = lt.node_data[pred].latestDupe();
         bool replace = false;
@@ -1203,7 +1200,7 @@ void Transform::preprocess() {
       auto loop_size = loop.size();
       
       for (int i = 1; i < loop_size; ++i)
-        duped_body.push_back(dupe_bb(loop.nodes[i]));
+        duped_body.push_back(dupe_bb(loop.nodes[i], header));
       
       for (auto bb : loop.nodes) {
         for (auto &[cond, dst]] : lt.node_data[bb].succs) {

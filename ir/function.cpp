@@ -347,6 +347,15 @@ void CFG::printDot(ostream &os) const {
   os << "}\n";
 }
 
+unsigned LoopTree::NodeData::latestDupe(unsigned loop) {
+  if (latest_dupe_loop != loop) {
+    latest_dupe_loop = loop;
+    latest_dupe = id;
+    dupe_counter = 0;
+  }
+  return latest_dupe;
+}
+
 // Get the representative of the set that presently contains basicblock bb
 unsigned LoopTree::vecsetFind(unsigned bb) {
   return vecsets[bb]->repr();
