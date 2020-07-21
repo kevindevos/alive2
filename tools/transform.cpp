@@ -1091,140 +1091,192 @@ void Transform::preprocess() {
     }
   }
 
-  // // INPUT : unroll factor : where to get it from?
-  // auto k = 1;
+  // INPUT : unroll factor : where to get it from?
+  auto k = 1;
 
-  // // Loop unrolling
-  // for (auto fn : { &src, &tgt }) {
-  //   CFG cfg(*fn);
-  //   LoopTree loop_tree(*fn, cfg);
-  //   auto node_data = loop_tree.getNodeData();
-  //   auto loop_data = loop_tree.getLoopData();
-  //   vector<unique_ptr<BasicBlock>> duped_bbs;
-  //   vector<unsigned> id_duped_bbs;
+  // Loop unrolling
+  for (auto fn : { &src, &tgt }) {
+    CFG cfg(*fn);
+    LoopTree lt(*fn, cfg);
+    auto orig_num_bbs = fn->getBBs().size();
+    vector<BasicBlock*> duped_bbs;
+    vector<unsigned> id_duped_bbs;
 
-  //   auto dupe_bb = [&](unsigned bb) {
-  //     auto &bb_data = node_data[bb];
-  //     auto &dupe_count = bb_data.dupe_counter;
-  //     auto bb_ptr = bb_data.bb->dup(dupe_count++);
-  //     // remove any edges to and from bb
-  //     // TODO
+    auto dupe_bb = [&](unsigned bb) {
+      auto &bb_data = lt.node_data[bb];
+      bb_data.id = bb;
+      auto &dupe_count = bb_data.dupe_counter;
+      auto bb_ptr = bb_data.bb->dup("#"+dupe_count++);
+      ((JumpInstr*) &bb_ptr->back())->clearTargets();
+      auto id = lt.node_data.size();
+      auto ins_bb = fn->addBB(move(*bb_ptr));
+      id_duped_bbs.push_back(id);
+      duped_bbs.push_back(ins_bb);
+      bb_data.latest_dupe = id;
+      lt.node_data.emplace_back();
+      lt.node_data[id].bb = ins_bb;
+      lt.number.push_back(lt.number.size());
+      lt.nodes.push_back(id);
       
-  //     auto id = node_data.size();
-  //     id_duped_bbs.push_back(id);
-  //     duped_bbs.push_back(move(bb_ptr));
-  //     node_data.emplace_back();
-  //     bb_data.latest_dupe = id;
-  //     node_data.back().bb = &duped_bbs.back().get();
-  //     return id;
-  //   };
+      return id;
+    };
 
-  //   bool in_loop = [&](unsigned bb, unsigned loop_header) {
-  //     for (auto loop : node_data[bb].containing_loops)
-  //       if (loop == loop_header)
-  //         return true;
-  //     return false;
-  //   };
+    bool in_loop = [&](unsigned bb, unsigned loop_header) {
+      for (auto loop : lt.node_data[bb].containing_loops)
+        if (loop == loop_header)
+          return true;
+      return false;
+    };
 
-  //   auto duplicate_header = [&](unsigned header, unsigned n_first) {
-  //     auto duped_header = dupe_bb(header);
-  //     auto &duped_header_data = node_data[duped_header];
+    bool is_back_edge = [&](unsigned src, unsigned dst) {
+      return lt.number[src] > lt.number[dst];
+    }
+    
+    // TODO problem: choosing alternate headers after havlak may
+    // break unroll, as the arrangement of edges should be different
+    // i may need to postpone the alternate header selection to after unroll
+    // or adjust the edges in havlak
+    void add_edge = [&](Value *cond, unsigned src, unsigned dst,
+                        bool replace = false, unsigned old_dst = 0) {
+      auto &src_data = lt.node_data[src];
+      src_data.succs.push_back(dst);
+      lt.node_data[dst].preds.push_back(src);
+      auto instr = (JumpInstr*) &src_data.bb->back();
+      if (!replace)
+        instr->addTarget(*cond, *lt.node_data[dst].bb);
+      else
+        instr->replaceTarget(*node_data[old_dst].bb, *lt.node_data[dst].bb);
+      // maintain topological ordering with the havlak preorder by
+      // ensuring that dst has a larger preorder than src.
+      if (is_back_edge(src, dst)) {
+        lt.nodes[lt.number[src]] = -1;
+        lt.nodes[lt.number[dst]] = -1;
+        lt.number[src] = lt.nodes.size();
+        lt.number[dst] = lt.nodes.size() + 1;
+        lt.nodes.push_back(src);
+        lt.nodes.push_back(dst);
+      } 
 
-  //     auto &n_first_data = node_data[n_first];
-  //     for (auto succ : n_first_data.succs) {
-  //       if (!in_loop(succ, header)) {
-  //         duped_header_data.succs.push_back(succ);
-  //         auto instr = (JumpInstr*) &duped_header_data.bb->back();
-  //         instr->clearTargets();
-  //         // add target, instr -> succ
-  //       }
-  //     }
-  //     for (auto pred : n_first_data.preds) {
-  //       if (in_loop(pred, header)) {
-  //         auto pred_ = node_data[pred].latest_dupe;
-  //         if (!pred_) pred_ = pred;
 
-  //         // edge.source' = getBBEquivIn(edge.source, n)
-  //         // create edge pred_ -> header
-  //         // add to node_data
-  //       }
-  //     }
-  //     return duped_header;
-  //   };
+    };
+    // TODO replacing back edges, but keeping them as reference is another
+    // difficulty, since deleting back edges will prevent subsequent k iterations
+    // from being able to reason on back-edges
 
-  //   auto duplicate_body = [&](unsigned header) {
-  //     vector<unsigned> duped_body;
-  //     auto &loop = loop_data[header];
-  //     auto loop_size = loop.size();
-  //     for (int i = 1; i < loop_size; ++i) {
-  //       duped_body.push_back(dupe_bb(loop.nodes[i]));
-  //     }
-  //     for (auto bb : loop.nodes) {
-  //       auto &bb_data = node_data[bb];
-  //       for (auto dst : bb_data.succs) {
-  //         bool is_back_edge; // check with topological ordering index < index
-  //         if (!is_back_edge) {
-  //           auto bb_ = bb_data.latest_dupe;
-  //           if (!bb_) bb_ = bb;
-  //           auto dst_latest_dupe = node_data[dst].latest_dupe;
-  //           if (!dst_latest_dupe) dst_latest_dupe = dst;
-            
-  //           auto dst_ = in_loop(dst, header) ? dst_latest_dupe : dst;
-  //           // TODO create edge bb' -> edge.dst'
-  //         }
-  //       }
-  //     }
+    auto duplicate_header = [&](unsigned header, unsigned n_first,
+                                unsigned n_prev) {
+      auto duped_header = dupe_bb(header);
+      auto &duped_header_data = lt.node_data[duped_header];
+      ((JumpInstr*) &duped_header_data.bb->back())->clearTargets();
 
-  //     return body;
-  //   };
+      auto &n_first_data = lt.node_data[n_first];
+      for (auto &[c, succ] : n_first_data.succs) {
+        if (!in_loop(succ, header))
+          add_edge(c, duped_header, succ);
+      }
+      
+      // TODO latestDupe() should reset if you call it for a new loop layer
+      // ex: calling latestDupe on the first inner loop is fine
+      // but moving to the loop that contains this inner one, should reset 
+      // the latestDupe, and dupe counter, so that they give those in "n_first"
 
-  //   vector<unsigned> visited;
-  //   stack<unsigned> S;
-  //   S.push(0);
-  //   visited.resize(loop_data.size());
-
-  //   while (!S.empty()) {
-  //     auto n = S.top();
-  //     S.pop();
-
-  //     if (!visited[n]) {
-  //       S.push(n);
-  //       for (auto child_loop : loop_data[n].child_loops)
-  //         S.push(child_loop);
-  //     } else {
-  //       // ignore loops not marked reducible and irreducible
-  //       auto n_type = node_data[n].type;
-  //       if (n_type != LoopTree::LHeaderType::reducible &&
-  //           n_type != LoopTree::LHeaderType::irreducible)
-  //         continue;
+      for (auto &[c, pred] : n_first_data.preds) {
+        auto pred_ = lt.node_data[pred].latestDupe();
+        bool replace = false;
+        if (is_back_edge(pred, n_first && (n_first != n_prev)) {
+          replace = true;
+          // keep back edge in succs as reference in the new bb
+          lt.node_data[pred_].succs.emplace_back(c, n_prev);
+          lt.node_data[n_prev].preds.emplace_back(c, pred_);
+        }
+        if (in_loop(pred, header))
+          add_edge(c, lt.node_data[pred].latestDupe(), duped_header, replace,
+                   n_prev);
         
-  //       unsigned n_first = n;
-  //       unsigned n_new = duplicate_header(n, n_first);
-  //       auto n_prev = n_new;
-  //       for (int i = 1; i < k; ++i) {
-  //         auto b_new = duplicate_body(n_prev);
-  //         n_new = duplicate_header(n_prev, n_first);
+      }
+      return duped_header;
+    };
 
-  //         for (auto dst : node_data[n_first].succs) {
-  //           if (in_loop(dst, n_first)) {
-  //             auto dst_ = node_data[dst].latest_dupe;
-  //             if (!dst_) dst_ = dst;
-  //             // create edge n_prev -> dst_ // dont forget both local and BB edges
-  //           }
-  //         }
-  //         n_prev = n_new;
-  //       }
+    auto duplicate_body = [&](unsigned header) {
+      vector<unsigned> duped_body;
+      auto &loop = lt.loop_data[header];
+      auto loop_size = loop.size();
+      
+      for (int i = 1; i < loop_size; ++i)
+        duped_body.push_back(dupe_bb(loop.nodes[i]));
+      
+      for (auto bb : loop.nodes) {
+        for (auto &[cond, dst]] : lt.node_data[bb].succs) {
+          if (!is_back_edge(bb, dst)) {
+            auto bb_ = lt.node_data[bb].latestDupe();
+            auto dst_latest_dupe = lt.node_data[dst].latestDupe();
+            auto dst_ = in_loop(dst, header) == true ? dst_latest_dupe : dst;
+            add_edge(cond, bb_, dst_);
+          }
+        }
+      }
 
-  //       // X for each loop containing this loop
-  //       // X   for each new bb added
-  //       // X     add new bb to body of containing loop
-  //       // may be better to do this the other way around, 
-  //       // on loop, check if has inner loops, if so, add the bbs duped there
-  //       // to current loop, this prevents having to iterate all loops at once
-  //       // and easier to code
-  //     }
-  //   }
-  // }
+      return body;
+    };
+
+    vector<unsigned> visited;
+    stack<unsigned> S;
+    S.push(0);
+    visited.resize(lt.loop_data.size());
+
+    while (!S.empty()) {
+      auto n = S.top();
+      S.pop();
+
+      if (!visited[n]) {
+        S.push(n);
+        for (auto child_loop : lt.loop_data[n].child_loops)
+          S.push(child_loop);
+      } else {
+        // ignore loops not marked reducible and irreducible
+        auto n_type = lt.node_data[n].type;
+        if (n_type != LoopTree::LHeaderType::reducible &&
+            n_type != LoopTree::LHeaderType::irreducible)
+          continue;
+        
+        unsigned n_first = n;
+        unsigned n_new = duplicate_header(n, n_first, n_new);
+        auto n_prev = n_new;
+        for (int i = 1; i < k; ++i) {
+          auto b_new = duplicate_body(n_prev);
+          n_new = duplicate_header(n_prev, n_first, n_prev);
+
+          for (auto &[c, dst] : lt.node_data[n_first].succs) {
+            if (in_loop(dst, n_first)) {
+              auto dst_ = lt.node_data[dst.second].latestDupe();
+              add_edge(c, n_prev, dst_);
+            }
+          }
+          n_prev = n_new;
+
+          // Note, if we were to not duplicate header, and just the body
+          // we would need to replace all back edges with jumps to #sink
+        }
+
+        // TODO
+        // X for each loop containing this loop
+        // X   for each new bb added
+        // X     add new bb to body of containing loop
+        // may be better to do this the other way around, 
+        // on loop, check if has inner loops, if so, add the bbs duped there
+        // to current loop, this prevents having to iterate all loops at once
+        // and easier to code
+      }
+    }
+  }
+  // TODO overwrite BB_order with the bb's arranged in the preorder
+  // This also implies that any top_sort called after the unroll can potentially
+  // break the arrangement of forward and back-edges, and affect the desired
+  // SE coverage, since unrolling produces an artificial ordering, that most
+  // likely top_sort would never produce.
+  
+  // Note that some nodes are -1 representing empty, these must be skipped
+  // they are -1 for convenience
 }
 
 void Transform::print(ostream &os, const TransformPrintOpts &opt) const {

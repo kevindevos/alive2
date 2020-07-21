@@ -350,6 +350,7 @@ public:
   it_helper targets() { return this; }
   void clearTargets();
   void addTarget(Value &val, BasicBlock &target);
+  void replaceTarget(BasicBlock &old_dst, BasicBlock &new_dst);
 };
 
 
@@ -390,6 +391,7 @@ public:
 
   void setDefaultTarget(Value &val, BasicBlock &target);
   void addTarget(Value &val, BasicBlock &target);
+  void setTarget(Value &val, BasicBlock &target, unsigned i);
   void clearTargets();
   auto getNumTargets() const { return targets.size(); }
   auto& getTarget(unsigned i) const { return targets[i]; }
