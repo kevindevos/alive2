@@ -1140,22 +1140,25 @@ void Transform::preprocess() {
 
     bool is_back_edge = [&](unsigned src, unsigned dst) {
       return lt.number[src] > lt.number[dst];
-    }
+    };
     
     // TODO problem: choosing alternate headers after havlak may
     // break unroll, as the arrangement of edges should be different
     // i may need to postpone the alternate header selection to after unroll
     // or adjust the edges in havlak
-    void add_edge = [&](Value *cond, unsigned src, unsigned dst,
-                        bool replace = false) {
+    void add_edge = [&](Value *cond, unsigned src, unsigned dst, bool replace) {
       auto &src_data = lt.node_data[src];
       src_data.succs.push_back(dst);
       lt.node_data[dst].preds.push_back(src);
       auto instr = (JumpInstr*) &src_data.bb->back();
-      if (!replace)
+      if (!replace) {
         instr->addTarget(cond, *lt.node_data[dst].bb);
-      else
-        instr->replaceTarget(cond, *lt.node_data[dst].bb);
+      } else {
+        bool replaced = instr->replaceTarget(cond, *lt.node_data[dst].bb);
+        // add in case it was not present
+        if (!replaced)
+          instr->addTarget(cond, *lt.node_data[dst].bb);
+      }
       // maintain topological ordering with the havlak preorder by
       // ensuring that dst has a larger preorder than src.
       if (is_back_edge(src, dst)) {
@@ -1166,12 +1169,9 @@ void Transform::preprocess() {
         lt.nodes.push_back(src);
         lt.nodes.push_back(dst);
       } 
-
-
     };
 
-    auto duplicate_header = [&](unsigned header, unsigned n_first,
-                                unsigned n_prev) {
+    auto duplicate_header = [&](unsigned header, unsigned n_first) {
       auto duped_header = dupe_bb(header, header);
       auto &duped_header_data = lt.node_data[duped_header];
       ((JumpInstr*) &duped_header_data.bb->back())->clearTargets();
@@ -1179,13 +1179,13 @@ void Transform::preprocess() {
       auto &n_first_data = lt.node_data[n_first];
       for (auto &[c, succ] : n_first_data.succs) {
         if (!in_loop(succ, header))
-          add_edge(c, duped_header, succ);
+          add_edge(c, duped_header, succ, false);
       }
       
       for (auto &[c, pred] : n_first_data.preds) {
         auto pred_ = lt.node_data[pred].latestDupe();
         bool replace = false;
-        if (is_back_edge(pred, n_first && (n_first != n_prev)) {
+        if (is_back_edge(pred, n_first)) {
           replace = true;
           // keep back edge in succs as reference in the new bb
           lt.node_data[pred_].succs.emplace_back(c, n_prev);
@@ -1212,12 +1212,11 @@ void Transform::preprocess() {
             auto bb_ = lt.node_data[bb].latestDupe();
             auto dst_latest_dupe = lt.node_data[dst].latestDupe();
             auto dst_ = in_loop(dst, header) == true ? dst_latest_dupe : dst;
-            add_edge(cond, bb_, dst_);
+            add_edge(cond, bb_, dst_, false);
           }
         }
       }
-
-      return body;
+      return duped_body;
     };
 
     vector<unsigned> visited;
@@ -1241,22 +1240,52 @@ void Transform::preprocess() {
           continue;
         
         unsigned n_first = n;
-        unsigned n_new = duplicate_header(n, n_first, n_new);
+        unsigned n_new = duplicate_header(n, n_first);
         auto n_prev = n_new;
         for (int i = 1; i < k; ++i) {
-          auto b_new = duplicate_body(n_prev);
-          n_new = duplicate_header(n_prev, n_first, n_prev);
+          duplicate_body(n_prev);
+          n_new = duplicate_header(n_prev, n_first);
 
           for (auto &[c, dst] : lt.node_data[n_first].succs) {
             if (in_loop(dst, n_first)) {
               auto dst_ = lt.node_data[dst.second].latestDupe();
-              add_edge(c, n_prev, dst_);
+              add_edge(c, n_prev, dst_, false);
             }
           }
           n_prev = n_new;
-
+          
           // Note, if we were to not duplicate header, and just the body
           // we would need to replace all back edges with jumps to #sink
+        }
+
+
+        if (lt.node_data[n_first].header != lt.ROOT_ID) {
+          // remove back-edges in succs and preds for n_first before containing
+          // loop's unroll
+          auto &n_first_data = lt.node_data[n_first];
+          auto &n_first_preds = n_first_data.preds;
+          for (int i = 0; i < n_first_preds.size(); ++i) {
+            auto &pred = n_first_preds[i].second;
+            if (is_back_edge(pred, n_first)) {
+              n_first_preds.erase(n_first_preds.begin()+i);
+              auto &pred_succs = lt.node_data[pred].succs;
+              for (int j = 0; j < pred_succs.size(); ++j)
+                if (pred_succs[j] == n_first)
+                  pred_succs.erase(pred_succs.begin()+j);
+            }
+          }
+          // add back-edges from last dupe to n_first to complete the 
+          // loop cycle for next unroll
+          auto &n_first_succs = n_first_data.succs;
+          auto n_last = n_first_data.latestDupe();
+          auto &n_last_data = lt.node_data[n_last];
+          // TODO, how will this work with multiple headers?
+          for (auto &[c, succ] : n_first_succs) {
+            if (in_loop(succ, n_first)) {
+              n_last_data.succs.emplace_back(c, succ);
+              lt.node_data[succ].preds.emplace_back(c, n_last);
+            }
+          }
         }
       }
     }

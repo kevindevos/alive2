@@ -350,7 +350,7 @@ public:
   it_helper targets() { return this; }
   void clearTargets();
   void addTarget(Value *val, BasicBlock &target);
-  void replaceTarget(Value *cond, BasicBlock &new_dst);
+  bool replaceTarget(Value *cond, BasicBlock &new_dst);
 };
 
 
