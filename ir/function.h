@@ -209,7 +209,6 @@ public:
     std::vector<unsigned> back_preds;
     std::vector<unsigned> red_back_in;
     std::vector<unsigned> other_in;
-    std::vector<unsigned> containing_loops;
     unsigned header;
     LHeaderType type;
     bool is_new;
