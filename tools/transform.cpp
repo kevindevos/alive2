@@ -1131,8 +1131,9 @@ void Transform::preprocess() {
     };
 
     bool in_loop = [&](unsigned bb, unsigned loop_header) {
+      // containing loops almost always is a single element vector
       for (auto loop : lt.node_data[bb].containing_loops)
-        if (loop == loop_header)
+        if (loop_header == loop)
           return true;
       return false;
     };
