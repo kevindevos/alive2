@@ -1122,6 +1122,10 @@ void Transform::preprocess() {
       lt.node_data[id].bb = ins_bb;
       lt.number.push_back(lt.number.size());
       lt.nodes.push_back(id);
+
+      // add new bb to body of outer loop for its unroll
+      if (bb_data.header != lt.ROOT_ID)
+        lt.loop_data[bb_data.header].nodes.push_back(id);
       
       return id;
     };
