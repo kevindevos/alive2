@@ -1147,15 +1147,15 @@ void Transform::preprocess() {
     // i may need to postpone the alternate header selection to after unroll
     // or adjust the edges in havlak
     void add_edge = [&](Value *cond, unsigned src, unsigned dst,
-                        bool replace = false, unsigned old_dst = 0) {
+                        bool replace = false) {
       auto &src_data = lt.node_data[src];
       src_data.succs.push_back(dst);
       lt.node_data[dst].preds.push_back(src);
       auto instr = (JumpInstr*) &src_data.bb->back();
       if (!replace)
-        instr->addTarget(*cond, *lt.node_data[dst].bb);
+        instr->addTarget(cond, *lt.node_data[dst].bb);
       else
-        instr->replaceTarget(*node_data[old_dst].bb, *lt.node_data[dst].bb);
+        instr->replaceTarget(cond, *lt.node_data[dst].bb);
       // maintain topological ordering with the havlak preorder by
       // ensuring that dst has a larger preorder than src.
       if (is_back_edge(src, dst)) {
@@ -1192,8 +1192,7 @@ void Transform::preprocess() {
           lt.node_data[n_prev].preds.emplace_back(c, pred_);
         }
         if (in_loop(pred, header))
-          add_edge(c, lt.node_data[pred].latestDupe(), duped_header, replace,
-                   n_prev);
+          add_edge(c, lt.node_data[pred].latestDupe(), duped_header, replace);
         
       }
       return duped_header;
