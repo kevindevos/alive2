@@ -210,6 +210,7 @@ public:
     std::vector<unsigned> red_back_in;
     std::vector<unsigned> other_in;
     unsigned header;
+    int first_header = -1;
     LHeaderType type;
     bool is_new;
     unsigned dupe_counter = 0;

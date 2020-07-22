@@ -569,7 +569,10 @@ void LoopTree::buildLoopTree() {
     }
     if (!P.empty()) {
       for (auto x : P) {
-        node_data[x].header = w;
+        auto &x_data = node_data[x];
+        x_data.header = w;
+        if (x_data.first_header == -1)
+          x_data.first_header = w;
         if (!loop_data[x].nodes.empty())
           loop_data[w].child_loops.push_back(x);
         vecsetUnion(x, w);

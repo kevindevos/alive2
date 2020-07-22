@@ -1117,6 +1117,8 @@ void Transform::preprocess() {
       auto &ins_n_data = lt.node_data[id];
       ins_n_data.bb = ins_bb;
       ins_n_data.id = id;
+      ins_n_data.header = bb_data.header;
+      ins_n_data.first_header = bb_data.first_header;
       lt.number.push_back(lt.nodes.size());
       lt.nodes.push_back(id);
 
@@ -1128,8 +1130,12 @@ void Transform::preprocess() {
     };
 
     bool in_loop = [&](unsigned bb, unsigned loop_header) {
-      for (auto node : lt.loop_data[loop_header].nodes) {
-        if (node == bb)
+      // O(loop_depth) ~=~ O(1)
+      auto bb_header = lt.node_data[bb].first_header;
+      while (bb_header != lt.ROOT_ID) {
+        if (bb_header != loop_header)
+          bb_header = lt.node_data[bb_header].first_header;
+        else
           return true;
       }
       return false;
@@ -1195,13 +1201,12 @@ void Transform::preprocess() {
       return duped_header;
     };
 
-    auto duplicate_body = [&](unsigned header) {
-      vector<unsigned> duped_body;
+    void duplicate_body = [&](unsigned header) {
       auto &loop = lt.loop_data[header];
       auto loop_size = loop.size();
       
       for (int i = 1; i < loop_size; ++i)
-        duped_body.push_back(dupe_bb(loop.nodes[i], header));
+        dupe_bb(loop.nodes[i], header);
       
       for (auto bb : loop.nodes) {
         for (auto &[cond, dst]] : lt.node_data[bb].succs) {
@@ -1213,7 +1218,6 @@ void Transform::preprocess() {
           }
         }
       }
-      return duped_body;
     };
 
     vector<unsigned> visited;
