@@ -409,10 +409,9 @@ void LoopTree::buildLoopTree() {
   auto DFS = [&]() {
     stack<const BasicBlock*> dfs_work_list;
 
-    unsigned START_BB_ID = 0;
     auto entry = &f.getFirstBB();
     dfs_work_list.push(entry);
-    unsigned current = START_BB_ID;
+    unsigned current = ROOT_ID;
 
     auto try_push_worklist = [&](const BasicBlock *bb, unsigned pred, auto c) {
       auto t_n = bb_id(bb);

@@ -195,6 +195,7 @@ public:
   enum LHeaderType { 
     none = 0, nonheader = 1, self = 2, reducible = 3, irreducible = 4 
   };
+  const unsigned ROOT_ID = 0;
 
   struct NodeData {
   private:
