@@ -1099,8 +1099,6 @@ void Transform::preprocess() {
     CFG cfg(*fn);
     LoopTree lt(*fn, cfg);
     auto orig_num_bbs = fn->getBBs().size();
-    vector<BasicBlock*> duped_bbs;
-    vector<unsigned> id_duped_bbs;
 
     auto dupe_bb = [&](unsigned bb, unsigned loop) {
       auto &bb_data = lt.node_data[bb];
@@ -1108,19 +1106,18 @@ void Transform::preprocess() {
       
       // reset latest dupe if we are unrolling a new loop, so previous latest
       // info is correct
-      bb_data.latestDupe();
+      bb_data.latestDupe(loop);
       
-      auto &dupe_count = bb_data.dupe_counter;
-      auto bb_ptr = bb_data.bb->dup("#"+dupe_count++);
+      auto bb_ptr = bb_data.bb->dup("#"+bb_data.dupe_counter++);
       ((JumpInstr*) &bb_ptr->back())->clearTargets();
       auto id = lt.node_data.size();
       auto ins_bb = fn->addBB(move(*bb_ptr));
-      id_duped_bbs.push_back(id);
-      duped_bbs.push_back(ins_bb);
       bb_data.latest_dupe = id;
       lt.node_data.emplace_back();
-      lt.node_data[id].bb = ins_bb;
-      lt.number.push_back(lt.number.size());
+      auto &ins_n_data = lt.node_data[id];
+      ins_n_data.bb = ins_bb;
+      ins_n_data.id = id;
+      lt.number.push_back(lt.nodes.size());
       lt.nodes.push_back(id);
 
       // add new bb to body of outer loop for its unroll
