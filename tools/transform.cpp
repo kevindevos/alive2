@@ -1259,26 +1259,27 @@ void Transform::preprocess() {
           // Note, if we were to not duplicate header, and just the body
           // we would need to replace all back edges with jumps to #sink
         }
-
-        // TODO
-        // X for each loop containing this loop
-        // X   for each new bb added
-        // X     add new bb to body of containing loop
-        // may be better to do this the other way around, 
-        // on loop, check if has inner loops, if so, add the bbs duped there
-        // to current loop, this prevents having to iterate all loops at once
-        // and easier to code
       }
     }
+    
+    // Overwrite BB_order for the function to maintain proper topological order
+    // ensuring that all edges in the unrolled CFG are forward edges
+    auto bbs = fn->getBBs();
+    auto bbs_size = bbs.size();
+    auto nodes_size = lt.nodes.size();
+    int offset = 0;
+    for (int i = 0; i < nodes_size; ++i) {
+      auto id = lt.nodes[i+offset];
+      while (id == -1) {
+        ++offset;
+        id = lt.nodes[i+offset];
+      }
+      if (i < bbs_size)
+        bbs[i] = node_data[id].bb;
+      else 
+        bbs.emplace_back(node_data[id].bb);
+    }
   }
-  // TODO overwrite BB_order with the bb's arranged in the preorder
-  // This also implies that any top_sort called after the unroll can potentially
-  // break the arrangement of forward and back-edges, and affect the desired
-  // SE coverage, since unrolling produces an artificial ordering, that most
-  // likely top_sort would never produce.
-  
-  // Note that some nodes are -1 representing empty, these must be skipped
-  // they are -1 for convenience
 }
 
 void Transform::print(ostream &os, const TransformPrintOpts &opt) const {
