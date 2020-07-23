@@ -214,7 +214,7 @@ public:
     LHeaderType type;
     bool is_new;
     unsigned dupe_counter = 0;
-    unsigned latestDupe(unsigned loop_id);
+    unsigned lastDupe(unsigned loop_id);
     int latest_dupe_loop = -1;
   };
 

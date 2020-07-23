@@ -347,7 +347,7 @@ void CFG::printDot(ostream &os) const {
   os << "}\n";
 }
 
-unsigned LoopTree::NodeData::latestDupe(unsigned loop) {
+unsigned LoopTree::NodeData::lastDupe(unsigned loop) {
   if (latest_dupe_loop != loop) {
     latest_dupe_loop = loop;
     latest_dupe = id;
@@ -578,39 +578,35 @@ void LoopTree::buildLoopTree() {
         vecsetUnion(x, w);
       }
      
-      if (node_data[w].is_new)
+      if (node_data[w].is_new) {
         loops_with_new_bb.push_back(w);
+        auto &w_loop_data = loop_data[w];
+        bool has_out_exit, has_out_entry, has_in_entry, has_in_exit;
+        for (auto lnode : vecsets[w]->getAll()) {
+          w_loop_data.nodes.push_back(lnode);
+          has_out_exit = has_out_entry = has_in_entry = has_in_exit = false;
+          if (lnode != w && loop_data[lnode].nodes.empty()) {
+            auto &lnode_data = node_data[lnode];
+            
+            for (auto &[c, pred] : lnode_data.preds) {
+              (void)c;
+              if (vecsetFind(pred) != w)
+                has_out_entry = true; // (pred, lnode) : x not in loop 
+              else
+                has_in_entry = true; // (pred, lnode) : x in loop
+            }
+            for (auto &[c, succ] : lnode_data.succs) {
+              (void)c;
+              if (vecsetFind(succ) != w)
+                has_out_exit = true; // (lnode, x) : x not in loop 
+              else
+                has_in_exit = true; // (lnode, x) : x in loop
+            }
 
-      auto &w_loop_data = loop_data[w];
-      bool has_out_exit, has_out_entry, has_in_entry, has_in_exit;
-      for (auto lnode : vecsets[w]->getAll()) {
-        w_loop_data.nodes.push_back(lnode);
-        has_out_exit = has_out_entry = has_in_entry = has_in_exit = false;
-        if (lnode != w && loop_data[lnode].nodes.empty()) {
-          auto &lnode_data = node_data[lnode];
-          // check predecessors
-          for (auto &[c, pred] : lnode_data.preds) {
-            (void)c;
-            if (vecsetFind(pred) != w)
-              has_out_entry = true; // (pred, lnode) : x not in loop 
-            else
-              has_in_entry = true; // (pred, lnode) : x in loop
-          }
-          // check sucessors
-          for (auto [c, succ] : lnode_data.succs) {
-            (void)c;
-            if (vecsetFind(succ) != w)
-              has_out_exit = true; // (lnode, x) : x not in loop 
-            else
-              has_in_exit = true; // (lnode, x) : x in loop
-          }
-
-          // check if it is a valid loop header
-          if (has_out_exit && has_out_entry && has_in_entry && has_in_exit) {
-            w_loop_data.alternate_headers.push_back(lnode);
-            auto &alt_data = node_data[lnode];
-            alt_data.header = w_data.header;
-            alt_data.type = w_data.type;
+            // check if it is a valid loop header
+            if (has_out_exit && has_out_entry && has_in_entry && has_in_exit) {
+              w_loop_data.alternate_headers.push_back(lnode);
+            }
           }
         }
       }
@@ -618,27 +614,6 @@ void LoopTree::buildLoopTree() {
     }
     if (!w_num)
       break;
-  }
-
-  // update header for loops with a new bb inserted in fix_loops
-  for (auto w : loops_with_new_bb) {
-    auto &w_loop_data = loop_data[w];
-    auto w_old_header = node_data[w].header;
-    // if an alternative header exists choose a new one
-    if (!w_loop_data.alternate_headers.empty()) {
-      auto &new_w = w_loop_data.alternate_headers.front();
-      auto &new_w_loop_data = loop_data[new_w];
-      new_w_loop_data.nodes.push_back(new_w);
-      node_data[new_w].header = w_old_header;
-      for (int i = w_loop_data.nodes.size() - 1; i >= 0; --i) {
-        auto &node = w_loop_data.nodes[i];
-        if (node != new_w) {
-          node_data[node].header = new_w;
-          new_w_loop_data.nodes.push_back(node);
-        }
-        w_loop_data.nodes.erase(w_loop_data.nodes.end());
-      }
-    }
   }
 }
 

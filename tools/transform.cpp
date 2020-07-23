@@ -1100,6 +1100,10 @@ void Transform::preprocess() {
     LoopTree lt(*fn, cfg);
     auto orig_num_bbs = fn->getBBs().size();
 
+    // TODO - irreducible loops, havlak adds bb's, so i need to include them 
+    // as normal bbs, although just empty with a jump instr with the targets
+    // it requires
+
     auto dupe_bb = [&](unsigned bb, unsigned loop) {
       auto &bb_data = lt.node_data[bb];
       bb_data.id = bb;
@@ -1130,7 +1134,6 @@ void Transform::preprocess() {
     };
 
     bool in_loop = [&](unsigned bb, unsigned loop_header) {
-      // O(loop_depth) ~=~ O(1)
       auto bb_header = lt.node_data[bb].first_header;
       while (bb_header != lt.ROOT_ID) {
         if (bb_header != loop_header)
@@ -1186,16 +1189,9 @@ void Transform::preprocess() {
       }
       
       for (auto &[c, pred] : n_first_data.preds) {
-        auto pred_ = lt.node_data[pred].latestDupe();
-        bool replace = false;
-        if (is_back_edge(pred, n_first)) {
-          replace = true;
-          // keep back edge in succs as reference in the new bb
-          lt.node_data[pred_].succs.emplace_back(c, n_prev);
-          lt.node_data[n_prev].preds.emplace_back(c, pred_);
-        }
+        auto pred_ = lt.node_data[pred].lastDupe(header);
         if (in_loop(pred, header))
-          add_edge(c, lt.node_data[pred].latestDupe(), duped_header, replace);
+          add_edge(c, pred_, duped_header, is_back_edge(pred, n_first));
         
       }
       return duped_header;
@@ -1209,12 +1205,11 @@ void Transform::preprocess() {
         dupe_bb(loop.nodes[i], header);
       
       for (auto bb : loop.nodes) {
+        if (bb == header) continue;
         for (auto &[cond, dst]] : lt.node_data[bb].succs) {
           if (!is_back_edge(bb, dst)) {
-            auto bb_ = lt.node_data[bb].latestDupe();
-            auto dst_latest_dupe = lt.node_data[dst].latestDupe();
-            auto dst_ = in_loop(dst, header) == true ? dst_latest_dupe : dst;
-            add_edge(cond, bb_, dst_, false);
+            add_edge(cond, lt.node_data[bb].lastDupe(header), 
+                     lt.node_data[dst].lastDupe(header), false);
           }
         }
       }
@@ -1234,29 +1229,30 @@ void Transform::preprocess() {
         for (auto child_loop : lt.loop_data[n].child_loops)
           S.push(child_loop);
       } else {
-        // ignore loops not marked reducible and irreducible
+        // ignore loops not marked reducible // and irreducible
         auto n_type = lt.node_data[n].type;
-        if (n_type != LoopTree::LHeaderType::reducible &&
-            n_type != LoopTree::LHeaderType::irreducible)
+        if (n_type != LoopTree::LHeaderType::reducible) //&&
+            //n_type != LoopTree::LHeaderType::irreducible)
           continue;
         
         unsigned n_first = n;
-        unsigned n_new = duplicate_header(n, n_first);
-        auto n_prev = n_new;
+        unsigned n_ = duplicate_header(n, n_first);
+        auto n_prev = n_;
         for (int i = 1; i < k; ++i) {
           duplicate_body(n_prev);
-          n_new = duplicate_header(n_prev, n_first);
+          n_ = duplicate_header(n_prev, n_first);
 
           for (auto &[c, dst] : lt.node_data[n_first].succs) {
             if (in_loop(dst, n_first)) {
-              auto dst_ = lt.node_data[dst.second].latestDupe();
-              add_edge(c, n_prev, dst_, false);
+              add_edge(c, n_prev, lt.node_data[dst.second].lastDupe(n_first),
+                       false);
             }
           }
-          n_prev = n_new;
+          n_prev = n_;
           
           // Note, if we were to not duplicate header, and just the body
-          // we would need to replace all back edges with jumps to #sink
+          // we would need to replace all back edges of the last iteration
+          // with jumps to #sink
         }
 
         // remove back-edges in succs and preds for n_first before containing
@@ -1275,11 +1271,10 @@ void Transform::preprocess() {
         }
         // add back-edges from last dupe to n_first to complete the 
         // loop cycle for next unroll
-        auto &n_first_succs = n_first_data.succs;
-        auto n_last = n_first_data.latestDupe();
+        auto n_last = n_first_data.lastDupe();
         auto &n_last_data = lt.node_data[n_last];
         // TODO, how will this work with multiple headers?
-        for (auto &[c, succ] : n_first_succs) {
+        for (auto &[c, succ] : n_first_data.succs) {
           if (in_loop(succ, n_first)) {
             n_last_data.succs.emplace_back(c, succ);
             lt.node_data[succ].preds.emplace_back(c, n_last);
