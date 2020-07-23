@@ -1110,8 +1110,14 @@ void Transform::preprocess() {
       // reset latest dupe if we are unrolling a new loop, so previous latest
       // info is correct
       bb_data.lastDupe(loop);
-      
-      auto bb_ptr = bb_data.bb->dup("#"+bb_data.dupe_counter++);
+      auto &bb_name = bb_data.bb->getName();
+      auto &dc = bb_data.dupe_counter;
+      string str = !dc ? bb_name+"_#" : bb_name.substr(0, bb_name.size()-1);
+      str += to_string(++bb_data.dupe_counter);
+
+      auto bb_ptr = bb_data.bb->dup("");
+      bb_ptr->setName(str);
+
       ((JumpInstr*) &bb_ptr->back())->clearTargets();
       auto id = lt.node_data.size();
       auto ins_bb = fn->addBB(move(*bb_ptr));
@@ -1121,6 +1127,7 @@ void Transform::preprocess() {
       auto &ins_n_data = lt.node_data[id];
       ins_n_data.bb = ins_bb;
       ins_n_data.id = id;
+      ins_n_data.dupe_counter = bb_data.dupe_counter;
       ins_n_data.header = bb_data.header;
       ins_n_data.first_header = bb_data.first_header;
       lt.number.push_back(lt.nodes.size());
