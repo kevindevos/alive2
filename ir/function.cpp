@@ -567,14 +567,20 @@ void LoopTree::buildLoopTree() {
       }
     }
     if (!P.empty()) {
+      auto &w_loop_data = loop_data[w];
       for (auto x : P) {
         auto &x_data = node_data[x];
         x_data.header = w;
         if (x_data.first_header == -1)
           x_data.first_header = w;
         if (!loop_data[x].nodes.empty())
-          loop_data[w].child_loops.push_back(x);
+          w_loop_data.child_loops.push_back(x);
         vecsetUnion(x, w);
+      }
+      
+      loop_header_ids.push_back(w);
+      for (auto node : vecsets[w]->getAll()) {
+        w_loop_data.nodes.push_back(node);
       }
      
       if (node_data[w].is_new) {
@@ -582,7 +588,6 @@ void LoopTree::buildLoopTree() {
         auto &w_loop_data = loop_data[w];
         bool has_out_exit, has_out_entry, has_in_entry, has_in_exit;
         for (auto lnode : vecsets[w]->getAll()) {
-          w_loop_data.nodes.push_back(lnode);
           has_out_exit = has_out_entry = has_in_entry = has_in_exit = false;
           if (lnode != w && loop_data[lnode].nodes.empty()) {
             auto &lnode_data = node_data[lnode];
@@ -609,7 +614,6 @@ void LoopTree::buildLoopTree() {
           }
         }
       }
-      loop_header_ids.push_back(w);
     }
     if (!w_num)
       break;
