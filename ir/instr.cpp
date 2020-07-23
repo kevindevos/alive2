@@ -1944,6 +1944,7 @@ bool JumpInstr::replaceTarget(Value *cond, BasicBlock &new_dst) {
     auto n_targets = sw->getNumTargets();
     for (int i = 0; i < n_targets; ++i) {
       auto &[val, dst] = sw->getTarget(i);
+      (void)dst;
       if (val == cond) {
         sw->setTarget(*val, &new_dst, i);
         ret = true;
@@ -2039,13 +2040,15 @@ void Switch::setDefaultTarget(Value &val, BasicBlock &target) {
 }
 
 void Switch::addTarget(Value &val, BasicBlock &target) {
-  targets.emplace_back(&val, &target);
+  if (default_target)
+    targets.emplace_back(&val, &target);
+  else
+    setDefaultTarget(val, target);
 }
 
 void Switch::setTarget(Value &val, BasicBlock &target, unsigned i) {
   if (i == 0) {
-    value = &val;
-    default_target = &target;
+    setDefaultTarget(val, target);
   } else {
     targets[i-1] = make_pair<Value*, BasicBlock*>(&val, &target);
   }

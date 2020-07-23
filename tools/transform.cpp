@@ -1233,7 +1233,8 @@ void Transform::preprocess() {
         auto n_type = lt.node_data[n].type;
         if (n_type != LoopTree::LHeaderType::reducible) //&&
             //n_type != LoopTree::LHeaderType::irreducible)
-          continue;
+          continue; // if there is a irreducible loop nested this may break 
+                    // the algorithm until irreducible support is added 
         
         unsigned n_first = n;
         unsigned n_ = duplicate_header(n, n_first);
