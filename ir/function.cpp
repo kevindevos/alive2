@@ -105,7 +105,7 @@ const BasicBlock* Function::getBBIfExists(std::string_view name) const {
 }
 
 BasicBlock* Function::addBB(BasicBlock &&bb) {
-  auto [b, inserted] = BBs.emplace(bb.getName(), bb);
+  auto [b, inserted] = BBs.emplace(bb.getName(), move(bb));
   BB_order.push_back(&b->second);
   return &b->second;
 }
@@ -348,12 +348,12 @@ void CFG::printDot(ostream &os) const {
 }
 
 unsigned LoopTree::NodeData::lastDupe(unsigned loop) {
-  if (latest_dupe_loop != loop) {
-    latest_dupe_loop = loop;
-    latest_dupe = id;
+  if (last_dupe_loop != (int) loop) {
+    last_dupe_loop = loop;
+    last_dupe = id;
     dupe_counter = 0;
   }
-  return latest_dupe;
+  return *last_dupe;
 }
 
 // Get the representative of the set that presently contains basicblock bb
@@ -538,11 +538,10 @@ void LoopTree::buildLoopTree() {
   stack<unsigned> work_list;
   vector<unsigned> loops_with_new_bb;
   for (unsigned w_num = nodes_size - 1; ; --w_num) {
-    auto &w = nodes[w_num];
+    auto w = (unsigned) nodes[w_num];
     P.clear();
     auto &w_data = node_data[w];
-    for (auto &[c, v] : w_data.back_preds) {
-      (void)c;
+    for (auto v : w_data.back_preds) {
       if (v != w) {
         auto v_repr = vecsetFind(v);
         P.insert(v_repr);

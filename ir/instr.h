@@ -390,7 +390,7 @@ public:
       default_target(&default_target) {}
 
   void setDefaultTarget(Value &val, BasicBlock &target);
-  void addTarget(Value *val, BasicBlock &target);
+  void addTarget(Value &val, BasicBlock &target);
   void setTarget(Value &val, BasicBlock &target, unsigned i);
   void clearTargets();
   auto getNumTargets() const { return targets.size(); }

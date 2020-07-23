@@ -198,8 +198,6 @@ public:
   const unsigned ROOT_ID = 0;
 
   struct NodeData {
-  private:
-    std::optional<unsigned> latest_dupe;
   public:
     unsigned id;
     BasicBlock *bb;
@@ -215,7 +213,8 @@ public:
     bool is_new;
     unsigned dupe_counter = 0;
     unsigned lastDupe(unsigned loop_id);
-    int latest_dupe_loop = -1;
+    int last_dupe_loop = -1;
+    std::optional<unsigned> last_dupe;
   };
 
   struct LoopData {

@@ -1098,25 +1098,24 @@ void Transform::preprocess() {
   for (auto fn : { &src, &tgt }) {
     CFG cfg(*fn);
     LoopTree lt(*fn, cfg);
-    auto orig_num_bbs = fn->getBBs().size();
 
     // TODO - irreducible loops, havlak adds bb's, so i need to include them 
     // as normal bbs, although just empty with a jump instr with the targets
     // it requires
 
-    auto dupe_bb = [&](unsigned bb, unsigned loop) {
+    auto dupe_bb = [&](unsigned bb, unsigned loop) -> unsigned {
       auto &bb_data = lt.node_data[bb];
       bb_data.id = bb;
       
       // reset latest dupe if we are unrolling a new loop, so previous latest
       // info is correct
-      bb_data.latestDupe(loop);
+      bb_data.lastDupe(loop);
       
       auto bb_ptr = bb_data.bb->dup("#"+bb_data.dupe_counter++);
       ((JumpInstr*) &bb_ptr->back())->clearTargets();
       auto id = lt.node_data.size();
       auto ins_bb = fn->addBB(move(*bb_ptr));
-      bb_data.latest_dupe = id;
+      bb_data.last_dupe = id;
       lt.node_data.emplace_back();
       auto &ins_n_data = lt.node_data[id];
       ins_n_data.bb = ins_bb;
@@ -1133,10 +1132,10 @@ void Transform::preprocess() {
       return id;
     };
 
-    bool in_loop = [&](unsigned bb, unsigned loop_header) {
+    auto in_loop = [&](unsigned bb, unsigned loop_header) -> bool {
       auto bb_header = lt.node_data[bb].first_header;
-      while (bb_header != lt.ROOT_ID) {
-        if (bb_header != loop_header)
+      while (bb_header != (int) lt.ROOT_ID) {
+        if (bb_header != (int) loop_header)
           bb_header = lt.node_data[bb_header].first_header;
         else
           return true;
@@ -1144,7 +1143,7 @@ void Transform::preprocess() {
       return false;
     };
 
-    bool is_back_edge = [&](unsigned src, unsigned dst) {
+    auto is_back_edge = [&](unsigned src, unsigned dst) -> bool {
       return lt.number[src] > lt.number[dst];
     };
     
@@ -1152,10 +1151,10 @@ void Transform::preprocess() {
     // break unroll, as the arrangement of edges should be different
     // i may need to postpone the alternate header selection to after unroll
     // or adjust the edges in havlak
-    void add_edge = [&](Value *cond, unsigned src, unsigned dst, bool replace) {
+    auto add_edge = [&](Value *cond, unsigned src, unsigned dst, bool replace) {
       auto &src_data = lt.node_data[src];
-      src_data.succs.push_back(dst);
-      lt.node_data[dst].preds.push_back(src);
+      src_data.succs.emplace_back(cond, dst);
+      lt.node_data[dst].preds.emplace_back(cond, src);
       auto instr = (JumpInstr*) &src_data.bb->back();
       if (!replace) {
         instr->addTarget(cond, *lt.node_data[dst].bb);
@@ -1177,7 +1176,7 @@ void Transform::preprocess() {
       } 
     };
 
-    auto duplicate_header = [&](unsigned header, unsigned n_first) {
+    auto duplicate_header = [&](unsigned header, unsigned n_first) -> unsigned {
       auto duped_header = dupe_bb(header, header);
       auto &duped_header_data = lt.node_data[duped_header];
       ((JumpInstr*) &duped_header_data.bb->back())->clearTargets();
@@ -1197,16 +1196,16 @@ void Transform::preprocess() {
       return duped_header;
     };
 
-    void duplicate_body = [&](unsigned header) {
+    auto duplicate_body = [&](unsigned header) {
       auto &loop = lt.loop_data[header];
-      auto loop_size = loop.size();
-      
-      for (int i = 1; i < loop_size; ++i)
+
+      auto loop_size = loop.nodes.size();
+      for (unsigned i = 1; i < loop_size; ++i)
         dupe_bb(loop.nodes[i], header);
       
       for (auto bb : loop.nodes) {
         if (bb == header) continue;
-        for (auto &[cond, dst]] : lt.node_data[bb].succs) {
+        for (auto &[cond, dst] : lt.node_data[bb].succs) {
           if (!is_back_edge(bb, dst)) {
             add_edge(cond, lt.node_data[bb].lastDupe(header), 
                      lt.node_data[dst].lastDupe(header), false);
@@ -1245,8 +1244,7 @@ void Transform::preprocess() {
 
           for (auto &[c, dst] : lt.node_data[n_first].succs) {
             if (in_loop(dst, n_first)) {
-              add_edge(c, n_prev, lt.node_data[dst.second].lastDupe(n_first),
-                       false);
+              add_edge(c, n_prev, lt.node_data[dst].lastDupe(n_first), false);
             }
           }
           n_prev = n_;
@@ -1260,19 +1258,19 @@ void Transform::preprocess() {
         // loop's unroll
         auto &n_first_data = lt.node_data[n_first];
         auto &n_first_preds = n_first_data.preds;
-        for (int i = 0; i < n_first_preds.size(); ++i) {
+        for (unsigned i = 0; i < n_first_preds.size(); ++i) {
           auto &pred = n_first_preds[i].second;
           if (is_back_edge(pred, n_first)) {
             n_first_preds.erase(n_first_preds.begin()+i);
             auto &pred_succs = lt.node_data[pred].succs;
-            for (int j = 0; j < pred_succs.size(); ++j)
-              if (pred_succs[j] == n_first)
+            for (unsigned j = 0; j < pred_succs.size(); ++j)
+              if (pred_succs[j].second == n_first)
                 pred_succs.erase(pred_succs.begin()+j);
           }
         }
         // add back-edges from last dupe to n_first to complete the 
         // loop cycle for next unroll
-        auto n_last = n_first_data.lastDupe();
+        auto n_last = n_first_data.lastDupe(n);
         auto &n_last_data = lt.node_data[n_last];
         // TODO, how will this work with multiple headers?
         for (auto &[c, succ] : n_first_data.succs) {
@@ -1290,16 +1288,16 @@ void Transform::preprocess() {
     auto bbs_size = bbs.size();
     auto nodes_size = lt.nodes.size();
     int offset = 0;
-    for (int i = 0; i < nodes_size; ++i) {
+    for (unsigned i = 0; i < nodes_size; ++i) {
       auto id = lt.nodes[i+offset];
       while (id == -1) {
         ++offset;
         id = lt.nodes[i+offset];
       }
       if (i < bbs_size)
-        bbs[i] = node_data[id].bb;
+        bbs[i] = lt.node_data[id].bb;
       else 
-        bbs.emplace_back(node_data[id].bb);
+        bbs.emplace_back(lt.node_data[id].bb);
     }
   }
 }
