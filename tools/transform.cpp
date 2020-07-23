@@ -1092,7 +1092,7 @@ void Transform::preprocess() {
   }
 
   // INPUT : unroll factor : where to get it from?
-  auto k = 1;
+  auto k = 2;
 
   // Loop unrolling
   for (auto fn : { &src, &tgt }) {
@@ -1117,6 +1117,7 @@ void Transform::preprocess() {
       auto ins_bb = fn->addBB(move(*bb_ptr));
       bb_data.last_dupe = id;
       lt.node_data.emplace_back();
+      lt.loop_data.emplace_back();
       auto &ins_n_data = lt.node_data[id];
       ins_n_data.bb = ins_bb;
       ins_n_data.id = id;
@@ -1134,7 +1135,7 @@ void Transform::preprocess() {
 
     auto in_loop = [&](unsigned bb, unsigned loop_header) -> bool {
       auto bb_header = lt.node_data[bb].first_header;
-      while (bb_header != (int) lt.ROOT_ID) {
+      while (bb_header != -1) {
         if (bb_header != (int) loop_header)
           bb_header = lt.node_data[bb_header].first_header;
         else
@@ -1197,7 +1198,7 @@ void Transform::preprocess() {
     };
 
     auto duplicate_body = [&](unsigned header) {
-      auto &loop = lt.loop_data[header];
+      auto &loop = lt.loop_data[header]; // something is wrong with this variable
 
       auto loop_size = loop.nodes.size();
       for (unsigned i = 1; i < loop_size; ++i)
@@ -1214,7 +1215,7 @@ void Transform::preprocess() {
       }
     };
 
-    vector<unsigned> visited;
+    vector<bool> visited;
     stack<unsigned> S;
     S.push(0);
     visited.resize(lt.loop_data.size());
@@ -1224,6 +1225,7 @@ void Transform::preprocess() {
       S.pop();
 
       if (!visited[n]) {
+        visited[n] = true;
         S.push(n);
         for (auto child_loop : lt.loop_data[n].child_loops)
           S.push(child_loop);
@@ -1284,19 +1286,12 @@ void Transform::preprocess() {
     
     // Overwrite BB_order for the function to maintain proper topological order
     // ensuring that all edges in the unrolled CFG are forward edges
-    auto bbs = fn->getBBs();
-    auto bbs_size = bbs.size();
+    auto &bbs = fn->getBBs(); // TODO clear first
+    bbs.clear();
     auto nodes_size = lt.nodes.size();
-    int offset = 0;
     for (unsigned i = 0; i < nodes_size; ++i) {
-      auto id = lt.nodes[i+offset];
-      while (id == -1) {
-        ++offset;
-        id = lt.nodes[i+offset];
-      }
-      if (i < bbs_size)
-        bbs[i] = lt.node_data[id].bb;
-      else 
+      auto id = lt.nodes[i];
+      if (id != -1)
         bbs.emplace_back(lt.node_data[id].bb);
     }
   }

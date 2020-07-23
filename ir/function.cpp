@@ -577,7 +577,6 @@ void LoopTree::buildLoopTree() {
           w_loop_data.child_loops.push_back(x);
         vecsetUnion(x, w);
       }
-      
       loop_header_ids.push_back(w);
       for (auto node : vecsets[w]->getAll()) {
         w_loop_data.nodes.push_back(node);
@@ -617,6 +616,12 @@ void LoopTree::buildLoopTree() {
     }
     if (!w_num)
       break;
+  }
+  
+  auto &root_loop_data = loop_data[ROOT_ID];
+  for (auto loop_hdr : loop_header_ids) {
+    if (node_data[loop_hdr].header == ROOT_ID)
+      root_loop_data.child_loops.push_back(loop_hdr);
   }
 }
 
