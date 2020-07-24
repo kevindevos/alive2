@@ -1099,6 +1099,10 @@ void Transform::preprocess() {
     LoopTree lt(*fn, cfg);
     vector<unsigned> duped_bbs;
 
+    // debug print dot file src before unroll
+    ofstream f1("src.dot");
+    cfg.printDot(f1);
+
     // TODO - irreducible loops, havlak adds bb's, so i need to include them 
     // as normal bbs, although just empty with a jump instr with the targets
     // it requires
@@ -1319,6 +1323,13 @@ void Transform::preprocess() {
       auto id = lt.nodes[i];
       if (id != -1)
         bbs.emplace_back(lt.node_data[id].bb);
+    }
+
+    // DEBUG , print unrolled dot for src only
+    if (fn == &src) {
+      CFG cfg_(*fn);
+      ofstream f2("src_unrolled.dot");
+      cfg_.printDot(f2);
     }
   }
 }
