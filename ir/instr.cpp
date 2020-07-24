@@ -1930,8 +1930,7 @@ bool JumpInstr::replaceTarget(Value *cond, BasicBlock &new_dst) {
     if (cond == &br->getCond()) {
       ret = true;
       br->setTrue(br->getCond(), new_dst);
-    }
-    if (cond == nullptr) {
+    } else if (cond == nullptr) {
       ret = true;
       br->setFalse(new_dst);
     }
