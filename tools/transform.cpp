@@ -1138,8 +1138,9 @@ void Transform::preprocess() {
       lt.number.push_back(lt.nodes.size());
       lt.nodes.push_back(id);
 
-      if (bb_data.header != lt.ROOT_ID)
-        duped_bbs.push_back(id);
+      auto &h_data = lt.node_data[loop];
+      if (h_data.header != lt.ROOT_ID)
+        lt.loop_data[h_data.header].nodes.push_back(id);
       
       return id;
     };
@@ -1305,12 +1306,6 @@ void Transform::preprocess() {
               n_last_data.succs.emplace_back(c, succ);
               lt.node_data[succ].preds.emplace_back(c, n_last);
             }
-          }
-          // add new bbs to body of outer loop for unroll
-          if (lt.node_data[n].header != lt.ROOT_ID) {
-            for (auto d_bb : duped_bbs)
-              lt.loop_data[n].nodes.push_back(d_bb);
-            duped_bbs.clear();
           }
         }
       }
