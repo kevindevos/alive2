@@ -13,6 +13,7 @@
 #include "util/symexec.h"
 #include <algorithm>
 #include <iostream>
+#include <fstream>
 #include <map>
 #include <set>
 #include <sstream>
@@ -1092,12 +1093,13 @@ void Transform::preprocess() {
   }
 
   // INPUT : unroll factor : where to get it from?
-  auto k = 1;
+  auto k = 2;
   // Loop unrolling
   for (auto fn : { &src, &tgt }) {
     CFG cfg(*fn);
     LoopTree lt(*fn, cfg);
     vector<unsigned> duped_bbs;
+    unsigned last_non_duped_id = lt.node_data.size()-1;
 
     // debug print dot file src before unroll
     ofstream f1("src.dot");
@@ -1107,33 +1109,35 @@ void Transform::preprocess() {
     // as normal bbs, although just empty with a jump instr with the targets
     // it requires
 
+    auto last_dupe = [&](unsigned bb) -> unsigned {
+      return *lt.node_data[lt.node_data[bb].original].last_dupe;
+    };
+
     auto dupe_bb = [&](unsigned bb, unsigned loop) -> unsigned {
       auto &bb_data = lt.node_data[bb];
       bb_data.id = bb;
-      
-      // reset latest dupe if we are unrolling a new loop, so previous latest
-      // info is correct
+
       bool is_duped = bb > last_non_duped_id;
-      bb_data.lastDupe(loop);
       auto &name = bb_data.bb->getName();
       string str = !is_duped ? name+"_#" : name.substr(0, name.size()-1);
       auto &dupe_counter = lt.node_data[bb_data.original].dupe_counter;
       str += to_string(++dupe_counter);
-
-      auto id = lt.node_data.size();
       auto bb_ptr = bb_data.bb->dup("");
       bb_ptr->setName(str);
       auto ins_bb = fn->addBB(move(*bb_ptr));
       ((JumpInstr*) &ins_bb->back())->clearTargets();
-      bb_data.last_dupe = id;
+      
+      auto id = lt.node_data.size();
       lt.node_data.emplace_back();
       if (id >= lt.loop_data.size())
         lt.loop_data.emplace_back();
       lt.loop_data[id].node_id = id;
+
       auto &ins_n_data = lt.node_data[id];
       ins_n_data.bb = ins_bb;
       ins_n_data.id = id;
       ins_n_data.dupe_counter = bb_data.dupe_counter;
+      lt.node_data[bb_data.original].last_dupe = id;
       ins_n_data.original = bb_data.original;
       ins_n_data.header = bb_data.header;
       ins_n_data.first_header = bb_data.first_header;
@@ -1204,7 +1208,7 @@ void Transform::preprocess() {
       }
       
       for (auto &[c, pred] : n_first_data.preds) {
-        auto pred_ = lt.node_data[pred].lastDupe(header);
+        auto pred_ = last_dupe(pred);
         if (in_loop(pred, header))
           add_edge(c, pred_, duped_header, is_back_edge(pred, n_first));
         
@@ -1225,8 +1229,7 @@ void Transform::preprocess() {
         if (bb == header) continue;
         for (auto &[cond, dst] : lt.node_data[bb].succs) {
           if (!is_back_edge(bb, dst)) {
-            add_edge(cond, lt.node_data[bb].lastDupe(header), 
-                     lt.node_data[dst].lastDupe(header), false);
+            add_edge(cond, last_dupe(bb), last_dupe(dst), false);
           }
         }
       }
@@ -1263,7 +1266,7 @@ void Transform::preprocess() {
 
           for (auto &[c, dst] : lt.node_data[n_first].succs) {
             if (in_loop(dst, n_first)) {
-              add_edge(c, n_prev, lt.node_data[dst].lastDupe(n_first), false);
+              add_edge(c, n_prev, last_dupe(dst), false);
             }
           }
           n_prev = n_;
@@ -1301,7 +1304,7 @@ void Transform::preprocess() {
           }
           // add back-edges from last dupe to n_first to complete the 
           // loop cycle for next unroll
-          auto n_last = n_first_data.lastDupe(n);
+          auto n_last = last_dupe(n_first);
           auto &n_last_data = lt.node_data[n_last];
           // TODO, how will this work with multiple headers?
           for (auto &[c, succ] : n_first_data.succs) {

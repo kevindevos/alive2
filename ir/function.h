@@ -213,7 +213,6 @@ public:
     LHeaderType type;
     bool is_new;
     unsigned dupe_counter = 0;
-    unsigned lastDupe(unsigned loop_id) { return *last_dupe; }
     std::optional<unsigned> last_dupe;
     unsigned original;
   };

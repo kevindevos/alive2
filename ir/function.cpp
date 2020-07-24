@@ -411,6 +411,7 @@ void LoopTree::buildLoopTree() {
       auto &t_data = node_data[t_n];
       t_data.id = t_n;
       t_data.original = t_n;
+      t_data.last_dupe = t_n;
       t_data.preds.emplace_back(c, pred);
       node_data[pred].succs.emplace_back(c, t_n);
     };
