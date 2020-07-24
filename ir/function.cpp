@@ -341,6 +341,8 @@ void CFG::printDot(ostream &os) const {
 
   for (auto [src, dst, instr] : *this) {
     (void)instr;
+    Branch *br = dynamic_cast<Branch*>(const_cast<Instr*>(&instr));
+    (void)br;
     os << '"' << bb_dot_name(src.getName()) << "\" -> \""
        << bb_dot_name(dst.getName()) << "\";\n";
   }
@@ -410,8 +412,6 @@ void LoopTree::buildLoopTree() {
         dfs_work_list.push(bb);
       auto &t_data = node_data[t_n];
       t_data.id = t_n;
-      t_data.original = t_n;
-      t_data.last_dupe = t_n;
       t_data.preds.emplace_back(c, pred);
       node_data[pred].succs.emplace_back(c, t_n);
     };
@@ -504,7 +504,7 @@ void LoopTree::buildLoopTree() {
   }
 
   for (auto &n_bb : new_bbs)
-    node_data[bb_map[&n_bb]].is_new = true;
+    node_data[bb_map[&n_bb]].added_in_fix_loops = true;
 
   // analyze_loops
   // b. distinguish between back edges and non back edges
@@ -512,7 +512,7 @@ void LoopTree::buildLoopTree() {
   loop_data.resize(nodes_size);
   for (unsigned w_num = 0; w_num < nodes_size; ++w_num) {
     auto &w = nodes[w_num];
-    loop_data[w].node_id = w;
+    loop_data[w].id = w;
     auto &w_data = node_data[w];
     w_data.header = 0;
     w_data.type = LHeaderType::nonheader;
@@ -566,7 +566,7 @@ void LoopTree::buildLoopTree() {
       for (auto x : P) {
         auto &x_data = node_data[x];
         x_data.header = w;
-        if (x_data.first_header == -1)
+        if (!x_data.first_header)
           x_data.first_header = w;
         if (!loop_data[x].nodes.empty())
           w_loop_data.child_loops.push_back(x);
@@ -577,7 +577,7 @@ void LoopTree::buildLoopTree() {
         w_loop_data.nodes.push_back(node);
       }
      
-      if (node_data[w].is_new) {
+      if (node_data[w].added_in_fix_loops) {
         loops_with_new_bb.push_back(w);
         auto &w_loop_data = loop_data[w];
         bool has_out_exit, has_out_entry, has_in_entry, has_in_exit;
@@ -613,6 +613,7 @@ void LoopTree::buildLoopTree() {
       break;
   }
 
+  // build child loops relationship for the root node
   auto &root_loop_data = loop_data[ROOT_ID];
   for (auto loop_hdr : loop_header_ids) {
     if (node_data[loop_hdr].header == ROOT_ID)
@@ -632,7 +633,7 @@ void LoopTree::printDot(std::ostream &os) const {
     auto &n_loop_data = loop_data[n];
     auto &n_data = node_data[n];
     auto bb = n;
-    if (n_data.is_new)
+    if (n_data.added_in_fix_loops)
       bb = n_loop_data.alternate_headers.front();
 
     cout << bb_dot_name(node_data[bb].bb->getName()) << " -> (";
@@ -647,7 +648,8 @@ void LoopTree::printDot(std::ostream &os) const {
   for (auto n : nodes) {
     auto &node = node_data[n];
     auto &node_loop_data = loop_data[n];
-    if (node.is_new && !node_loop_data.alternate_headers.empty()) continue;
+    if (node.added_in_fix_loops && !node_loop_data.alternate_headers.empty()) 
+      continue;
     auto header_id = node.header;
     auto &header_loop_data = loop_data[node.header];
     if (!header_loop_data.alternate_headers.empty())

@@ -209,16 +209,13 @@ public:
     std::vector<unsigned> red_back_in;
     std::vector<unsigned> other_in;
     unsigned header;
-    int first_header = -1;
+    std::optional<unsigned> first_header;
     LHeaderType type;
-    bool is_new;
-    unsigned dupe_counter = 0;
-    std::optional<unsigned> last_dupe;
-    unsigned original;
+    bool added_in_fix_loops;
   };
 
   struct LoopData {
-    unsigned node_id;
+    unsigned id;
     std::vector<unsigned> nodes;
     std::vector<unsigned> alternate_headers;
     std::vector<unsigned> child_loops;
