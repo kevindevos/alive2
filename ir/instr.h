@@ -366,9 +366,10 @@ public:
 
   auto getTrue() { return dst_true; }
   auto getFalse() { return dst_false; }
-  void setTrue(Value &val, BasicBlock &target);
+  void setTrue(Value *val, BasicBlock &target);
   void setFalse(BasicBlock &target);
-  Value& getCond() { return *cond; }
+  auto getCond() { return cond; }
+  void setCond(Value *val) { cond = val; }
   void clearTargets();
   std::vector<Value*> operands() const override;
   void rauw(const Value &what, Value &with) override;
@@ -389,14 +390,14 @@ public:
     : JumpInstr(Type::voidTy, "switch"), value(&value),
       default_target(&default_target) {}
 
-  void setDefaultTarget(Value &val, BasicBlock &target);
+  void setDefaultTarget(Value *val, BasicBlock &target);
   void addTarget(Value &val, BasicBlock &target);
-  void setTarget(Value &val, BasicBlock &target, unsigned i);
+  void setTarget(Value *val, BasicBlock &target, unsigned i);
   void clearTargets();
   auto getNumTargets() const { return targets.size(); }
   auto& getTarget(unsigned i) const { return targets[i]; }
   auto getDefault() const { return default_target; }
-  auto& getDefaultValue() const { return *value; }
+  auto getDefaultValue() const { return value; }
 
   std::vector<Value*> operands() const override;
   void rauw(const Value &what, Value &with) override;

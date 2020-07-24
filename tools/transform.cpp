@@ -1092,8 +1092,7 @@ void Transform::preprocess() {
   }
 
   // INPUT : unroll factor : where to get it from?
-  auto k = 2;
-
+  auto k = 1;
   // Loop unrolling
   for (auto fn : { &src, &tgt }) {
     CFG cfg(*fn);
@@ -1263,6 +1262,18 @@ void Transform::preprocess() {
           // we would need to replace all back edges of the last iteration
           // with jumps to #sink
         }
+
+        // TODO multiple headers
+        // last duped header should only have edges to targets out of the loop
+        // since the next body iteration is ignored (iteration k)
+        // if it is branch with null else, make cond nullptr (making it a goto)
+        auto instr = &lt.node_data[n_].bb->back();
+        if (auto br = dynamic_cast<Branch*>(instr)) {
+          if (br->getCond() != nullptr && br->getFalse() == nullptr)
+            br->setCond(nullptr);
+        }
+
+
         if (k > 1) {
           // remove back-edges in succs and preds for n_first before containing
           // loop's unroll

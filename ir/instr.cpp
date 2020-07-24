@@ -1873,14 +1873,14 @@ const BasicBlock& JumpInstr::target_iterator::operator*() const {
 pair<Value*, const BasicBlock&> JumpInstr::target_iterator::get() const {
   if (auto br = dynamic_cast<Branch*>(instr)) {
     if (idx == 0)
-      return { &br->getCond(), *br->getTrue() };
+      return { br->getCond(), *br->getTrue() };
     else
       return { nullptr, *br->getFalse() };
   }
 
   if (auto sw = dynamic_cast<Switch*>(instr)) {
     if (idx == 0) {
-      return { &sw->getDefaultValue(), *sw->getDefault() };
+      return { sw->getDefaultValue(), *sw->getDefault() };
     } else {
       auto tgt = sw->getTarget(idx-1);
       return { tgt.first,  *tgt.second };
@@ -1913,12 +1913,12 @@ void JumpInstr::clearTargets() {
 void JumpInstr::addTarget(Value *val, BasicBlock &target) {
   if (auto br = dynamic_cast<Branch*>(this)) {
     if (val)
-      br->setTrue(*val, target);
+      br->setTrue(val, target);
     else
       br->setFalse(target);
   } else if (auto sw = dynamic_cast<Switch*>(this)) {
     if (!sw->getDefault())
-      sw->setDefaultTarget(*val, target);
+      sw->setDefaultTarget(val, target);
     else 
       sw->addTarget(*val, target);
   }
@@ -1927,7 +1927,7 @@ void JumpInstr::addTarget(Value *val, BasicBlock &target) {
 bool JumpInstr::replaceTarget(Value *cond, BasicBlock &new_dst) {
   bool ret = false;
   if (auto br = dynamic_cast<Branch*>(this)) {
-    if (cond == &br->getCond()) {
+    if (cond == br->getCond()) {
       ret = true;
       br->setTrue(br->getCond(), new_dst);
     } else if (cond == nullptr) {
@@ -1936,7 +1936,7 @@ bool JumpInstr::replaceTarget(Value *cond, BasicBlock &new_dst) {
     }
   } else if (auto sw = dynamic_cast<Switch*>(this)) {
     // replace for both default and targets if duplicate exists
-    if (&sw->getDefaultValue() == cond) {
+    if (sw->getDefaultValue() == cond) {
       ret = true;
       sw->setDefaultTarget(sw->getDefaultValue(), new_dst);
     }
@@ -1945,7 +1945,7 @@ bool JumpInstr::replaceTarget(Value *cond, BasicBlock &new_dst) {
       auto &[val, dst] = sw->getTarget(i);
       (void)dst;
       if (val == cond) {
-        sw->setTarget(*val, new_dst, i);
+        sw->setTarget(val, new_dst, i);
         ret = true;
       }
     }
@@ -1953,8 +1953,8 @@ bool JumpInstr::replaceTarget(Value *cond, BasicBlock &new_dst) {
   return ret;
 }
 
-void Branch::setTrue(Value &val, BasicBlock &target) {
-  cond = &val;
+void Branch::setTrue(Value *val, BasicBlock &target) {
+  cond = val;
   dst_true = &target;
 }
 
@@ -2033,8 +2033,8 @@ unique_ptr<Instr> Branch::dup(const string &suffix) const {
   return make_unique<Branch>(*dst_true);
 }
 
-void Switch::setDefaultTarget(Value &val, BasicBlock &target) {
-  value = &val;
+void Switch::setDefaultTarget(Value *val, BasicBlock &target) {
+  value = val;
   default_target = &target;
 }
 
@@ -2042,14 +2042,15 @@ void Switch::addTarget(Value &val, BasicBlock &target) {
   if (default_target)
     targets.emplace_back(&val, &target);
   else
-    setDefaultTarget(val, target);
+    setDefaultTarget(&val, target);
 }
 
-void Switch::setTarget(Value &val, BasicBlock &target, unsigned i) {
+void Switch::setTarget(Value *val, BasicBlock &target, unsigned i) {
   if (i == 0) {
     setDefaultTarget(val, target);
   } else {
-    targets[i-1] = make_pair<Value*, BasicBlock*>(&val, &target);
+    targets[i-1].first = val;
+    targets[i-1].second = &target;
   }
 }
 
