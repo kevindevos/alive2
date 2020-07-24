@@ -1126,8 +1126,9 @@ void Transform::preprocess() {
       ((JumpInstr*) &ins_bb->back())->clearTargets();
       bb_data.last_dupe = id;
       lt.node_data.emplace_back();
-      lt.loop_data.emplace_back();
-      lt.loop_data.back().node_id = id;
+      if (id >= lt.loop_data.size())
+        lt.loop_data.emplace_back();
+      lt.loop_data[id].node_id = id;
       auto &ins_n_data = lt.node_data[id];
       ins_n_data.bb = ins_bb;
       ins_n_data.id = id;
@@ -1208,9 +1209,11 @@ void Transform::preprocess() {
     };
 
     auto duplicate_body = [&](unsigned header) {
-      auto &loop = lt.loop_data[header]; // something is wrong with this variable
+      unsigned loop_size = lt.loop_data[header].nodes.size();
+      lt.loop_data.reserve(lt.loop_data.size()+loop_size);
+      auto &loop = lt.loop_data[header];
+      loop_size = loop.nodes.size();
 
-      auto loop_size = loop.nodes.size();
       for (unsigned i = 1; i < loop_size; ++i)
         dupe_bb(loop.nodes[i], header);
       
