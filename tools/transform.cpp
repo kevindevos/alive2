@@ -1263,41 +1263,40 @@ void Transform::preprocess() {
           // we would need to replace all back edges of the last iteration
           // with jumps to #sink
         }
-
-        // remove back-edges in succs and preds for n_first before containing
-        // loop's unroll
-        auto &n_first_data = lt.node_data[n_first];
-        auto &n_first_preds = n_first_data.preds;
-        for (unsigned i = 0; i < n_first_preds.size(); ++i) {
-          auto &pred = n_first_preds[i].second;
-          if (is_back_edge(pred, n_first)) {
-            n_first_preds.erase(n_first_preds.begin()+i);
-            auto &pred_succs = lt.node_data[pred].succs;
-            for (unsigned j = 0; j < pred_succs.size(); ++j)
-              if (pred_succs[j].second == n_first)
-                pred_succs.erase(pred_succs.begin()+j);
+        if (k > 1) {
+          // remove back-edges in succs and preds for n_first before containing
+          // loop's unroll
+          auto &n_first_data = lt.node_data[n_first];
+          auto &n_first_preds = n_first_data.preds;
+          for (unsigned i = 0; i < n_first_preds.size(); ++i) {
+            auto &pred = n_first_preds[i].second;
+            if (is_back_edge(pred, n_first)) {
+              n_first_preds.erase(n_first_preds.begin()+i);
+              auto &pred_succs = lt.node_data[pred].succs;
+              for (unsigned j = 0; j < pred_succs.size(); ++j)
+                if (pred_succs[j].second == n_first)
+                  pred_succs.erase(pred_succs.begin()+j);
+            }
+          }
+          // add back-edges from last dupe to n_first to complete the 
+          // loop cycle for next unroll
+          auto n_last = n_first_data.lastDupe(n);
+          auto &n_last_data = lt.node_data[n_last];
+          // TODO, how will this work with multiple headers?
+          for (auto &[c, succ] : n_first_data.succs) {
+            if (in_loop(succ, n_first)) {
+              n_last_data.succs.emplace_back(c, succ);
+              lt.node_data[succ].preds.emplace_back(c, n_last);
+            }
+          }
+          // add new bbs to body of outer loop for unroll
+          if (lt.node_data[n].header != lt.ROOT_ID) {
+            for (auto d_bb : duped_bbs)
+              lt.loop_data[n].nodes.push_back(d_bb);
+            duped_bbs.clear();
           }
         }
-        // add back-edges from last dupe to n_first to complete the 
-        // loop cycle for next unroll
-        auto n_last = n_first_data.lastDupe(n);
-        auto &n_last_data = lt.node_data[n_last];
-        // TODO, how will this work with multiple headers?
-        for (auto &[c, succ] : n_first_data.succs) {
-          if (in_loop(succ, n_first)) {
-            n_last_data.succs.emplace_back(c, succ);
-            lt.node_data[succ].preds.emplace_back(c, n_last);
-           }
-        }
-        // add new bbs to body of outer loop for unroll
-        if (lt.node_data[n].header != lt.ROOT_ID) {
-          for (auto d_bb : duped_bbs)
-            lt.loop_data[n].nodes.push_back(d_bb);
-          duped_bbs.clear();
-        }
-
       }
-
     }
     
     // Overwrite BB_order for the function to maintain proper topological order
