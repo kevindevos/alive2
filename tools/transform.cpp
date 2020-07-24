@@ -1117,7 +1117,8 @@ void Transform::preprocess() {
       bb_data.lastDupe(loop);
       auto &name = bb_data.bb->getName();
       string str = !is_duped ? name+"_#" : name.substr(0, name.size()-1);
-      str += to_string(++bb_data.dupe_counter);
+      auto &dupe_counter = lt.node_data[bb_data.original].dupe_counter;
+      str += to_string(++dupe_counter);
 
       auto id = lt.node_data.size();
       auto bb_ptr = bb_data.bb->dup("");
@@ -1133,11 +1134,13 @@ void Transform::preprocess() {
       ins_n_data.bb = ins_bb;
       ins_n_data.id = id;
       ins_n_data.dupe_counter = bb_data.dupe_counter;
+      ins_n_data.original = bb_data.original;
       ins_n_data.header = bb_data.header;
       ins_n_data.first_header = bb_data.first_header;
       lt.number.push_back(lt.nodes.size());
       lt.nodes.push_back(id);
 
+      // add duped bbs straight into the containing loop's body
       auto &h_data = lt.node_data[loop];
       if (h_data.header != lt.ROOT_ID)
         lt.loop_data[h_data.header].nodes.push_back(id);
