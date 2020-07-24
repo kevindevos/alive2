@@ -1098,6 +1098,7 @@ void Transform::preprocess() {
   for (auto fn : { &src, &tgt }) {
     CFG cfg(*fn);
     LoopTree lt(*fn, cfg);
+    vector<unsigned> duped_bbs;
 
     // TODO - irreducible loops, havlak adds bb's, so i need to include them 
     // as normal bbs, although just empty with a jump instr with the targets
@@ -1124,6 +1125,7 @@ void Transform::preprocess() {
       bb_data.last_dupe = id;
       lt.node_data.emplace_back();
       lt.loop_data.emplace_back();
+      lt.loop_data.back().node_id = id;
       auto &ins_n_data = lt.node_data[id];
       ins_n_data.bb = ins_bb;
       ins_n_data.id = id;
@@ -1133,9 +1135,8 @@ void Transform::preprocess() {
       lt.number.push_back(lt.nodes.size());
       lt.nodes.push_back(id);
 
-      // add new bb to body of outer loop for its unroll
       if (bb_data.header != lt.ROOT_ID)
-        lt.loop_data[bb_data.header].nodes.push_back(id);
+        duped_bbs.push_back(id);
       
       return id;
     };
@@ -1248,8 +1249,8 @@ void Transform::preprocess() {
         unsigned n_ = duplicate_header(n, n_first);
         auto n_prev = n_;
         for (int i = 1; i < k; ++i) {
-          duplicate_body(n_prev);
-          n_ = duplicate_header(n_prev, n_first);
+          duplicate_body(n_first);
+          n_ = duplicate_header(n_first, n_first);
 
           for (auto &[c, dst] : lt.node_data[n_first].succs) {
             if (in_loop(dst, n_first)) {
@@ -1288,7 +1289,15 @@ void Transform::preprocess() {
             lt.node_data[succ].preds.emplace_back(c, n_last);
            }
         }
+        // add new bbs to body of outer loop for unroll
+        if (lt.node_data[n].header != lt.ROOT_ID) {
+          for (auto d_bb : duped_bbs)
+            lt.loop_data[n].nodes.push_back(d_bb);
+          duped_bbs.clear();
+        }
+
       }
+
     }
     
     // Overwrite BB_order for the function to maintain proper topological order

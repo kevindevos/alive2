@@ -351,7 +351,6 @@ unsigned LoopTree::NodeData::lastDupe(unsigned loop) {
   if (last_dupe_loop != (int) loop) {
     last_dupe_loop = loop;
     last_dupe = id;
-    dupe_counter = 0;
   }
   return *last_dupe;
 }
@@ -515,8 +514,10 @@ void LoopTree::buildLoopTree() {
   // analyze_loops
   // b. distinguish between back edges and non back edges
   unsigned nodes_size = nodes.size();
+  loop_data.resize(nodes_size);
   for (unsigned w_num = 0; w_num < nodes_size; ++w_num) {
     auto &w = nodes[w_num];
+    loop_data[w].node_id = w;
     auto &w_data = node_data[w];
     w_data.header = 0;
     w_data.type = LHeaderType::nonheader;
@@ -532,7 +533,6 @@ void LoopTree::buildLoopTree() {
   // c. d. e. 
   // for each node with incoming reducible backedge, builds a set of bbs
   // that represents the loop, sets the loop header and type
-  loop_data.resize(nodes_size);
   node_data[0].header = 0;
   unordered_set<unsigned> P;
   stack<unsigned> work_list;
@@ -617,7 +617,7 @@ void LoopTree::buildLoopTree() {
     if (!w_num)
       break;
   }
-  
+
   auto &root_loop_data = loop_data[ROOT_ID];
   for (auto loop_hdr : loop_header_ids) {
     if (node_data[loop_hdr].header == ROOT_ID)
