@@ -1912,7 +1912,7 @@ void JumpInstr::clearTargets() {
 
 void JumpInstr::addTarget(Value *val, BasicBlock &target) {
   if (auto br = dynamic_cast<Branch*>(this)) {
-    if (val)
+    if (val || !br->getTrue())
       br->setTrue(val, target);
     else
       br->setFalse(target);
