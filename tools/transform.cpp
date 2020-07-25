@@ -1170,17 +1170,15 @@ void Transform::preprocess() {
       auto &u_ins_data = unroll_data[id];
       
       // if bb was last duped in a different loop, make it the new original
+      u_ins_data.original = u_bb_data.original;
       if (u_bb_data.prev_loop_dupe.has_value() && 
-          u_bb_data.prev_loop_dupe != cur_loop) {
+                 u_bb_data.prev_loop_dupe != cur_loop) {
         u_ins_data.original = bb;
-        u_bb_data.prev_loop_dupe = cur_loop;
-      } else {
-        u_ins_data.original = u_bb_data.original;
-      }
-
+      } 
+      
+      u_bb_data.prev_loop_dupe = cur_loop;
       unroll_data[u_ins_data.original].last_dupe = id;
       u_ins_data.dupe_counter = unroll_data[u_ins_data.original].dupe_counter;
-      u_bb_data.prev_loop_dupe = cur_loop;
       u_ins_data.id = id;
       
       lt.number.push_back(lt.nodes.size());
