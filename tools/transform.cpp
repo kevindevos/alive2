@@ -1109,6 +1109,8 @@ void Transform::preprocess() {
     vector<unsigned> duped_bbs;
     unsigned last_non_duped_id = lt.node_data.size()-1;
     vector<UnrollNodeData> unroll_data;
+    unsigned current_loop;
+    optional<unsigned> previous_loop;
 
     // Prepare data structure for unroll algorithm
     for (auto node : lt.node_data) {
@@ -1131,7 +1133,7 @@ void Transform::preprocess() {
       return *unroll_data[unroll_data[bb].original].last_dupe;
     };
 
-    auto dupe_bb = [&](unsigned bb, unsigned loop) -> unsigned {
+    auto dupe_bb = [&](unsigned bb) -> unsigned {
       auto &bb_data = lt.node_data[bb];
       bb_data.id = bb;
 
@@ -1170,7 +1172,7 @@ void Transform::preprocess() {
       lt.nodes.push_back(id);
 
       // add duped bbs straight into the containing loop's body
-      auto &h_data = lt.node_data[loop];
+      auto &h_data = lt.node_data[current_loop];
       if (h_data.header != lt.ROOT_ID)
         lt.loop_data[h_data.header].nodes.push_back(id);
       
@@ -1226,7 +1228,7 @@ void Transform::preprocess() {
     };
 
     auto duplicate_header = [&](unsigned header, unsigned n_first) -> unsigned {
-      auto duped_header = dupe_bb(header, header);
+      auto duped_header = dupe_bb(header);
       auto &duped_header_data = lt.node_data[duped_header];
       ((JumpInstr*) &duped_header_data.bb->back())->clearTargets();
 
@@ -1244,20 +1246,20 @@ void Transform::preprocess() {
       return duped_header;
     };
 
-    auto duplicate_body = [&](unsigned header) {
-      unsigned loop_size = lt.loop_data[header].nodes.size();
+    auto duplicate_body = [&]() {
+      unsigned loop_size = lt.loop_data[current_loop].nodes.size();
       lt.loop_data.reserve(lt.loop_data.size()+loop_size);
-      auto &loop = lt.loop_data[header];
+      auto &loop = lt.loop_data[current_loop];
       loop_size = loop.nodes.size();
 
       for (unsigned i = 1; i < loop_size; ++i)
-        dupe_bb(loop.nodes[i], header);
+        dupe_bb(loop.nodes[i]);
       
       for (auto bb : loop.nodes) {
-        if (bb == header) continue;
+        if (bb == current_loop) continue;
         for (auto &[cond, dst] : lt.node_data[bb].succs) {
           if (!is_back_edge(bb, unroll_data[dst].original)) {
-            auto dst_ = in_loop(dst, header) ? last_dupe(dst) : dst;
+            auto dst_ = in_loop(dst, current_loop) ? last_dupe(dst) : dst;
             add_edge(cond, last_dupe(bb), dst_, false);
           }
         }
@@ -1279,6 +1281,8 @@ void Transform::preprocess() {
         for (auto child_loop : lt.loop_data[n].child_loops)
           S.push(child_loop);
       } else {
+        current_loop = n;
+
         // ignore loops not marked reducible // and irreducible
         auto n_type = lt.node_data[n].type;
         if (n_type != LoopTree::LHeaderType::reducible) //&&
@@ -1290,7 +1294,7 @@ void Transform::preprocess() {
         unsigned n_ = duplicate_header(n, n_first);
         auto n_prev = n_;
         for (int i = 1; i < k; ++i) {
-          duplicate_body(n_first);
+          duplicate_body();
           n_ = duplicate_header(n_first, n_first);
 
           for (auto &[c, dst] : lt.node_data[n_first].succs) {
@@ -1342,6 +1346,7 @@ void Transform::preprocess() {
             }
           }
         }
+        previous_loop = current_loop;
       }
     }
     
