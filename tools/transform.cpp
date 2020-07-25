@@ -1100,10 +1100,12 @@ void Transform::preprocess() {
     unsigned dupe_counter_;
   public:
     unsigned id;
-    unsigned original; // the bb from which id was duped
+    // the bb from which id was duped
+    unsigned original;
+    // the bb in original CFG from which this has been duped
+    unsigned first_original; 
     shared_ptr<unsigned> dupe_counter = make_shared<unsigned>(dupe_counter_);
     std::optional<unsigned> last_dupe;
-
     // id of loop in which this bb was last duped in
     optional<unsigned> prev_loop_dupe;
   };
@@ -1115,7 +1117,10 @@ void Transform::preprocess() {
     vector<unsigned> duped_bbs;
     unsigned last_non_duped_id = lt.node_data.size()-1;
     vector<UnrollNodeData> unroll_data;
+    vector<unsigned> final_dupes;
     unsigned cur_loop; // current loop being unrolled
+    unsigned prev_loop; // loop unrolled before current
+    vector<unsigned> seen_loops;
 
     // Prepare data structure for unroll algorithm
     for (auto node : lt.node_data) {
@@ -1123,7 +1128,9 @@ void Transform::preprocess() {
       auto &u_data = unroll_data.back();
       u_data.id = node.id;
       u_data.original = node.id;
+      u_data.first_original = node.id;
       u_data.last_dupe = node.id;
+      final_dupes.push_back(node.id);
     }
 
     // debug print dot file src before unroll
@@ -1182,6 +1189,8 @@ void Transform::preprocess() {
       unroll_data[u_ins_data.original].last_dupe = id;
       u_ins_data.dupe_counter = unroll_data[u_ins_data.original].dupe_counter;
       u_ins_data.id = id;
+      u_ins_data.first_original = u_bb_data.first_original;
+      final_dupes[u_ins_data.first_original] = id;
       
       lt.number.push_back(lt.nodes.size());
       lt.nodes.push_back(id);
@@ -1297,6 +1306,9 @@ void Transform::preprocess() {
           S.push(child_loop);
       } else {
         cur_loop = n;
+        if (lt.node_data[prev_loop].header != cur_loop)
+          seen_loops.clear();
+        seen_loops.push_back(n);
 
         // ignore loops not marked reducible // and irreducible
         auto n_type = lt.node_data[n].type;
@@ -1312,11 +1324,10 @@ void Transform::preprocess() {
           duplicate_body();
           n_ = duplicate_header(n_first, n_first);
 
-          for (auto &[c, dst] : lt.node_data[n_first].succs) {
-            if (in_loop(dst, n_first)) {
+          for (auto &[c, dst] : lt.node_data[n_first].succs)
+            if (in_loop(dst, n_first))
               add_edge(c, n_prev, last_dupe(dst), false);
-            }
-          }
+
           n_prev = n_;
           
           // Note, if we were to not duplicate header, and just the body
@@ -1324,14 +1335,16 @@ void Transform::preprocess() {
           // with jumps to #sink
         }
 
-        // TODO multiple headers
-        // last duped header should only have edges to targets out of the loop
-        // since the next body iteration is ignored (iteration k)
-        // if it is branch with null else, make cond nullptr (making it a goto)
-        auto instr = &lt.node_data[n_].bb->back();
-        if (auto br = dynamic_cast<Branch*>(instr)) {
-          if (br->getCond() != nullptr && br->getFalse() == nullptr)
-            br->setCond(nullptr);
+        // TODO irreducible loops
+        // get the very last duped bb of each loop header and make sure
+        // the back-edge is a goto if it has a branch
+        for (auto seen_loop : seen_loops) {
+          auto final_duped_header = final_dupes[seen_loop];
+          auto instr = &lt.node_data[final_duped_header].bb->back();
+          if (auto br = dynamic_cast<Branch*>(instr)) {
+            if (br->getCond() != nullptr && br->getFalse() == nullptr)
+              br->setCond(nullptr);
+          }
         }
 
         // remove back-edges in succs and preds for n_first before containing
@@ -1361,6 +1374,7 @@ void Transform::preprocess() {
             }
           }
         }
+        prev_loop = cur_loop;
       }
     }
     
