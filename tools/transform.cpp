@@ -1096,10 +1096,16 @@ void Transform::preprocess() {
   auto k = 2;
   
   struct UnrollNodeData {
+  private:
+    unsigned dupe_counter_;
+  public:
     unsigned id;
-    unsigned original;
-    shared_ptr<unsigned> dupe_counter = make_shared<unsigned>(0);
+    unsigned original; // the bb from which id was duped
+    shared_ptr<unsigned> dupe_counter = make_shared<unsigned>(dupe_counter_);
     std::optional<unsigned> last_dupe;
+
+    // id of loop in which this bb was last duped in
+    optional<unsigned> prev_loop_dupe;
   };
 
   // Loop unrolling
@@ -1109,8 +1115,7 @@ void Transform::preprocess() {
     vector<unsigned> duped_bbs;
     unsigned last_non_duped_id = lt.node_data.size()-1;
     vector<UnrollNodeData> unroll_data;
-    unsigned current_loop;
-    optional<unsigned> previous_loop;
+    unsigned cur_loop; // current loop being unrolled
 
     // Prepare data structure for unroll algorithm
     for (auto node : lt.node_data) {
@@ -1144,7 +1149,6 @@ void Transform::preprocess() {
       auto &u_orig_data = unroll_data[unroll_data[bb].original];
       auto &dupe_counter = u_orig_data.dupe_counter;
       auto id = lt.node_data.size();
-      u_orig_data.last_dupe = id;
       str += to_string(++(*dupe_counter));
       auto bb_ptr = bb_data.bb->dup("");
       bb_ptr->setName(str);
@@ -1164,15 +1168,26 @@ void Transform::preprocess() {
 
       unroll_data.emplace_back();
       auto &u_ins_data = unroll_data[id];
-      u_ins_data.original = u_bb_data.original;
+      
+      // if bb was last duped in a different loop, make it the new original
+      if (u_bb_data.prev_loop_dupe.has_value() && 
+          u_bb_data.prev_loop_dupe != cur_loop) {
+        u_ins_data.original = bb;
+        u_bb_data.prev_loop_dupe = cur_loop;
+      } else {
+        u_ins_data.original = u_bb_data.original;
+      }
+
+      unroll_data[u_ins_data.original].last_dupe = id;
+      u_ins_data.dupe_counter = unroll_data[u_ins_data.original].dupe_counter;
+      u_bb_data.prev_loop_dupe = cur_loop;
       u_ins_data.id = id;
-      u_ins_data.dupe_counter = unroll_data[u_bb_data.original].dupe_counter;
       
       lt.number.push_back(lt.nodes.size());
       lt.nodes.push_back(id);
 
-      // add duped bbs straight into the containing loop's body
-      auto &h_data = lt.node_data[current_loop];
+      // add duped bbs straight into the containing loop's body if it exists
+      auto &h_data = lt.node_data[cur_loop];
       if (h_data.header != lt.ROOT_ID)
         lt.loop_data[h_data.header].nodes.push_back(id);
       
@@ -1247,19 +1262,19 @@ void Transform::preprocess() {
     };
 
     auto duplicate_body = [&]() {
-      unsigned loop_size = lt.loop_data[current_loop].nodes.size();
+      unsigned loop_size = lt.loop_data[cur_loop].nodes.size();
       lt.loop_data.reserve(lt.loop_data.size()+loop_size);
-      auto &loop = lt.loop_data[current_loop];
+      auto &loop = lt.loop_data[cur_loop];
       loop_size = loop.nodes.size();
 
       for (unsigned i = 1; i < loop_size; ++i)
         dupe_bb(loop.nodes[i]);
       
       for (auto bb : loop.nodes) {
-        if (bb == current_loop) continue;
+        if (bb == cur_loop) continue;
         for (auto &[cond, dst] : lt.node_data[bb].succs) {
           if (!is_back_edge(bb, unroll_data[dst].original)) {
-            auto dst_ = in_loop(dst, current_loop) ? last_dupe(dst) : dst;
+            auto dst_ = in_loop(dst, cur_loop) ? last_dupe(dst) : dst;
             add_edge(cond, last_dupe(bb), dst_, false);
           }
         }
@@ -1281,7 +1296,7 @@ void Transform::preprocess() {
         for (auto child_loop : lt.loop_data[n].child_loops)
           S.push(child_loop);
       } else {
-        current_loop = n;
+        cur_loop = n;
 
         // ignore loops not marked reducible // and irreducible
         auto n_type = lt.node_data[n].type;
@@ -1346,7 +1361,6 @@ void Transform::preprocess() {
             }
           }
         }
-        previous_loop = current_loop;
       }
     }
     
