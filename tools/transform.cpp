@@ -1196,9 +1196,12 @@ void Transform::preprocess() {
       lt.nodes.push_back(id);
 
       // add duped bbs straight into the containing loop's body if it exists
-      auto &h_data = lt.node_data[cur_loop];
-      if (h_data.header != lt.ROOT_ID)
-        lt.loop_data[h_data.header].nodes.push_back(id);
+      auto fh = *lt.node_data[cur_loop].first_header;
+      auto h_data = &lt.node_data[fh]; // OR FIRST_HEADER?, anywhere im missing first_header? instead of header
+      while (h_data->id != lt.ROOT_ID) {
+        lt.loop_data[h_data->id].nodes.push_back(id);
+        h_data = &lt.node_data[*h_data->first_header];
+      }
       
       return id;
     };
