@@ -1177,6 +1177,7 @@ void Transform::preprocess() {
       } 
       
       u_bb_data.prev_loop_dupe = cur_loop;
+      u_ins_data.prev_loop_dupe = cur_loop;
       unroll_data[u_ins_data.original].last_dupe = id;
       u_ins_data.dupe_counter = unroll_data[u_ins_data.original].dupe_counter;
       u_ins_data.id = id;
