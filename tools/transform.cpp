@@ -1145,6 +1145,7 @@ void Transform::preprocess() {
       bool is_duped = bb > last_non_duped_id;
       auto &name = bb_data.bb->getName();
       string str = !is_duped ? name+"_#" : name.substr(0, name.size()-1);
+      unroll_data.emplace_back();
       auto &u_bb_data = unroll_data[bb];
       auto &u_orig_data = unroll_data[unroll_data[bb].original];
       auto &dupe_counter = u_orig_data.dupe_counter;
@@ -1166,13 +1167,12 @@ void Transform::preprocess() {
       ins_n_data.header = bb_data.header;
       ins_n_data.first_header = *bb_data.first_header;
 
-      unroll_data.emplace_back();
       auto &u_ins_data = unroll_data[id];
       
       // if bb was last duped in a different loop, make it the new original
       u_ins_data.original = u_bb_data.original;
       if (u_bb_data.prev_loop_dupe.has_value() && 
-                 u_bb_data.prev_loop_dupe != cur_loop) {
+          u_bb_data.prev_loop_dupe != cur_loop) {
         u_ins_data.original = bb;
         u_bb_data.original = bb;
       } 
