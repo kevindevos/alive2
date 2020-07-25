@@ -1098,7 +1098,7 @@ void Transform::preprocess() {
   struct UnrollNodeData {
     unsigned id;
     unsigned original;
-    unsigned dupe_counter = 0;
+    shared_ptr<unsigned> dupe_counter = make_shared<unsigned>(0);
     std::optional<unsigned> last_dupe;
   };
 
@@ -1143,7 +1143,7 @@ void Transform::preprocess() {
       auto &dupe_counter = u_orig_data.dupe_counter;
       auto id = lt.node_data.size();
       u_orig_data.last_dupe = id;
-      str += to_string(++dupe_counter);
+      str += to_string(++(*dupe_counter));
       auto bb_ptr = bb_data.bb->dup("");
       bb_ptr->setName(str);
       auto ins_bb = fn->addBB(move(*bb_ptr));
@@ -1164,6 +1164,7 @@ void Transform::preprocess() {
       auto &u_ins_data = unroll_data[id];
       u_ins_data.original = u_bb_data.original;
       u_ins_data.id = id;
+      u_ins_data.dupe_counter = unroll_data[u_bb_data.original].dupe_counter;
       
       lt.number.push_back(lt.nodes.size());
       lt.nodes.push_back(id);
