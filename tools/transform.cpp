@@ -1119,7 +1119,7 @@ void Transform::preprocess() {
     vector<UnrollNodeData> unroll_data;
     vector<unsigned> final_dupes;
     unsigned cur_loop; // current loop being unrolled
-    unsigned prev_loop; // loop unrolled before current
+    optional<unsigned> prev_loop; // loop unrolled before current
     vector<unsigned> seen_loops;
 
     // Prepare data structure for unroll algorithm
@@ -1306,7 +1306,8 @@ void Transform::preprocess() {
           S.push(child_loop);
       } else {
         cur_loop = n;
-        if (lt.node_data[prev_loop].header != cur_loop)
+        if (prev_loop.has_value() && 
+            lt.node_data[*prev_loop].header != cur_loop)
           seen_loops.clear();
         seen_loops.push_back(n);
 
