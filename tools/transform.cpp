@@ -1174,6 +1174,7 @@ void Transform::preprocess() {
       if (u_bb_data.prev_loop_dupe.has_value() && 
                  u_bb_data.prev_loop_dupe != cur_loop) {
         u_ins_data.original = bb;
+        u_bb_data.original = bb;
       } 
       
       u_bb_data.prev_loop_dupe = cur_loop;
