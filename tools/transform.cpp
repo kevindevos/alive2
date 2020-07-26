@@ -1107,7 +1107,6 @@ void Transform::preprocess() {
     // the bb from which id was duped
     unsigned original;
     // the bb in original CFG from which this has been duped
-    unsigned first_original; 
     shared_ptr<unsigned> dupe_counter = make_shared<unsigned>(dupe_counter_);
     std::optional<unsigned> last_dupe;
     // id of loop in which this bb was last duped in
@@ -1122,10 +1121,8 @@ void Transform::preprocess() {
     vector<unsigned> duped_bbs;
     unsigned last_non_duped_id = lt.node_data.size()-1;
     vector<UnrollNodeData> unroll_data;
-    vector<unsigned> final_dupes;
     unsigned cur_loop; // current loop being unrolled
     optional<unsigned> prev_loop; // loop unrolled before current
-    vector<unsigned> seen_loops;
 
     // Prepare data structure for unroll algorithm
     for (auto node : lt.node_data) {
@@ -1133,9 +1130,7 @@ void Transform::preprocess() {
       auto &u_data = unroll_data.back();
       u_data.id = node.id;
       u_data.original = node.id;
-      u_data.first_original = node.id;
       u_data.last_dupe = node.id;
-      final_dupes.push_back(node.id);
     }
 
     // debug print dot file src before unroll
@@ -1194,8 +1189,6 @@ void Transform::preprocess() {
       unroll_data[u_ins_data.original].last_dupe = id;
       u_ins_data.dupe_counter = unroll_data[u_ins_data.original].dupe_counter;
       u_ins_data.id = id;
-      u_ins_data.first_original = u_bb_data.first_original;
-      final_dupes[u_ins_data.first_original] = id;
       
       lt.number.push_back(lt.nodes.size());
       lt.nodes.push_back(id);

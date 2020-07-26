@@ -341,8 +341,6 @@ void CFG::printDot(ostream &os) const {
 
   for (auto [src, dst, instr] : *this) {
     (void)instr;
-    Branch *br = dynamic_cast<Branch*>(const_cast<Instr*>(&instr));
-    (void)br;
     os << '"' << bb_dot_name(src.getName()) << "\" -> \""
        << bb_dot_name(dst.getName()) << "\";\n";
   }
