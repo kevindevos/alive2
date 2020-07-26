@@ -1093,11 +1093,11 @@ void Transform::preprocess() {
   }
 
   // INPUT : unroll factor : where to get it from?
-  auto k = 1;
+  auto k = 2;
 
   // DEBUG
   auto loops_so_far = 0;
-  auto max_loops = 1;
+  auto max_loops = 3;
 
   struct UnrollNodeData {
   private:
@@ -1350,11 +1350,15 @@ void Transform::preprocess() {
           }
 
           // duped header edges
-          for (auto &[c, dst] : lt.node_data[n].succs)
+          for (auto &[c, dst] : lt.node_data[n].succs) {
+            // debug
+            auto dst_ = last_dupe(dst);
+            (void)dst_;
             if (in_loop(dst, n))
               add_edge(c, n_prev, last_dupe(dst), false);
             else
               add_edge(c, n_, dst, false);
+          }
          
           n_prev = n_;
         }

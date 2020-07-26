@@ -1912,10 +1912,16 @@ void JumpInstr::clearTargets() {
 
 void JumpInstr::addTarget(Value *val, BasicBlock &target) {
   if (auto br = dynamic_cast<Branch*>(this)) {
-    if (val || !br->getTrue())
+    if (!val) {
+      if (br->getTrue()) {
+        br->setFalse(target);
+      } else {
+        br->setTrue(val, target);
+      }
+    } else {
+      br->setFalse(*br->getTrue());
       br->setTrue(val, target);
-    else
-      br->setFalse(target);
+    }
   } else if (auto sw = dynamic_cast<Switch*>(this)) {
     if (!sw->getDefault())
       sw->setDefaultTarget(val, target);
