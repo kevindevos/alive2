@@ -1093,7 +1093,7 @@ void Transform::preprocess() {
   }
 
   // INPUT : unroll factor : where to get it from?
-  auto k = 1;
+  auto k = 2;
 
   // DEBUG
   auto loops_so_far = 0;
@@ -1201,11 +1201,15 @@ void Transform::preprocess() {
       lt.nodes.push_back(id);
 
       // add duped bbs straight into the containing loop's body if it exists
-      auto h_data = &lt.node_data[header];
-      while (h_data->id != lt.ROOT_ID) {
-        lt.loop_data[h_data->id].nodes.push_back(id);
-        h_data = &lt.node_data[*h_data->first_header];
+      auto &fh = lt.node_data[header].first_header;
+      if (fh) {
+        auto h_data = &lt.node_data[*fh];
+        while (h_data->id != lt.ROOT_ID) {
+          lt.loop_data[h_data->id].nodes.push_back(id);
+          h_data = &lt.node_data[*h_data->first_header];
+        }
       }
+
       
       return id;
     };
@@ -1327,9 +1331,8 @@ void Transform::preprocess() {
         
         auto n_prev = last_dupe(n);
         for (int i = 1; i < k; ++i) {
-          // create BB copies of the loop body
+          // create BB copies of the loop body and header
           duplicate_body();
-          // create BB copies of the loop header
           auto n_ = duplicate_header(n, n);
 
           // duped body edges
