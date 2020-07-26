@@ -1924,20 +1924,16 @@ void JumpInstr::addTarget(Value *val, BasicBlock &target) {
   }
 }
 
-bool JumpInstr::replaceTarget(Value *cond, BasicBlock &new_dst) {
-  bool ret = false;
+void JumpInstr::replaceTarget(Value *cond, BasicBlock &new_dst) {
   if (auto br = dynamic_cast<Branch*>(this)) {
     if (cond == br->getCond()) {
-      ret = true;
       br->setTrue(br->getCond(), new_dst);
-    } else if (cond == nullptr) {
-      ret = true;
+    } else if (cond == nullptr && br->getTrue() != &new_dst) {
       br->setFalse(new_dst);
     }
   } else if (auto sw = dynamic_cast<Switch*>(this)) {
     // replace for both default and targets if duplicate exists
     if (sw->getDefaultValue() == cond) {
-      ret = true;
       sw->setDefaultTarget(sw->getDefaultValue(), new_dst);
     }
     int n_targets = sw->getNumTargets();
@@ -1946,11 +1942,9 @@ bool JumpInstr::replaceTarget(Value *cond, BasicBlock &new_dst) {
       (void)dst;
       if (val == cond) {
         sw->setTarget(val, new_dst, i);
-        ret = true;
       }
     }
   }
-  return ret;
 }
 
 void Branch::setTrue(Value *val, BasicBlock &target) {
