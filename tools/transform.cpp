@@ -1093,7 +1093,7 @@ void Transform::preprocess() {
   }
 
   // INPUT : unroll factor : where to get it from?
-  auto k = 2;
+  auto k = 1;
 
   // DEBUG
   auto loops_so_far = 0;
@@ -1238,16 +1238,26 @@ void Transform::preprocess() {
     // or adjust the edges in havlak
     auto add_edge = [&](Value *cond, unsigned src, unsigned dst, bool replace) {
       auto &src_data = lt.node_data[src];
-      src_data.succs.emplace_back(cond, dst);
-      lt.node_data[dst].preds.emplace_back(cond, src);
-
       auto instr = (JumpInstr*) &src_data.bb->back();
+      bool replaced = false;
       if (!replace) {
-        instr->addTarget(cond, *lt.node_data[dst].bb);
+        src_data.succs.emplace_back(cond, dst);
       } else {
-        bool replaced = instr->replaceTarget(cond, *lt.node_data[dst].bb);
+        replaced = instr->replaceTarget(cond, *lt.node_data[dst].bb);
         if (!replaced)
           instr->addTarget(cond, *lt.node_data[dst].bb);
+      }
+      
+      if (!replaced) {
+        lt.node_data[dst].preds.emplace_back(cond, src);
+        instr->addTarget(cond, *lt.node_data[dst].bb);
+      } else {
+        auto &succs = lt.node_data[src].succs;
+        auto succs_size = succs.size();
+        for (unsigned i = 0; i < succs_size; ++i) {
+          if (succs[i].first == cond)
+            succs[i].second = dst;
+        }
       }
       
       // enforce topological ordering with the havlak preorder by
@@ -1326,7 +1336,7 @@ void Transform::preprocess() {
           
           for (auto &[c, pred] : lt.node_data[loop].preds)
             if (in_loop(pred, loop))
-              add_edge(c, pred, n_, false);
+              add_edge(c, pred, n_, is_back_edge(pred, loop));
         }
         
         auto n_prev = last_dupe(n);
@@ -1342,7 +1352,7 @@ void Transform::preprocess() {
             auto bb = loop[i];
             for (auto &[cond, dst] : lt.node_data[bb].succs) {
               auto dst_ = in_loop(dst, cur_loop) ? last_dupe(dst) : dst;
-              add_edge(cond, last_dupe(bb), dst_, false);
+              add_edge(cond, last_dupe(bb), dst_, is_back_edge(bb, dst));
             }
           }
 
