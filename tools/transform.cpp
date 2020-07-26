@@ -1239,27 +1239,19 @@ void Transform::preprocess() {
     auto add_edge = [&](Value *cond, unsigned src, unsigned dst, bool replace) {
       auto &src_data = lt.node_data[src];
       auto instr = (JumpInstr*) &src_data.bb->back();
-      bool replaced = false;
-      if (!replace) {
-        src_data.succs.emplace_back(cond, dst);
+
+      if (replace) {
+        instr->replaceTarget(cond, *lt.node_data[dst].bb);
+        for (auto &[c, succ] : lt.node_data[src].succs)
+          if (c == cond) succ = dst;
+        for (auto &[c, pred] : lt.node_data[dst].preds)
+          if (c == cond) pred = src;
       } else {
-        replaced = instr->replaceTarget(cond, *lt.node_data[dst].bb);
-        if (!replaced)
-          instr->addTarget(cond, *lt.node_data[dst].bb);
-      }
-      
-      if (!replaced) {
-        lt.node_data[dst].preds.emplace_back(cond, src);
         instr->addTarget(cond, *lt.node_data[dst].bb);
-      } else {
-        auto &succs = lt.node_data[src].succs;
-        auto succs_size = succs.size();
-        for (unsigned i = 0; i < succs_size; ++i) {
-          if (succs[i].first == cond)
-            succs[i].second = dst;
-        }
+        lt.node_data[dst].preds.emplace_back(cond, src);
+        lt.node_data[src].succs.emplace_back(cond, dst);
       }
-      
+
       // enforce topological ordering with the havlak preorder by
       // ensuring that dst has a larger preorder than src.
       if (is_back_edge(src, dst)) {
