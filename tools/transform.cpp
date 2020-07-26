@@ -1343,7 +1343,8 @@ void Transform::preprocess() {
           for (unsigned i = 1; i < loop_size; ++i) {
             auto bb = loop[i];
             for (auto &[cond, dst] : lt.node_data[bb].succs) {
-              auto dst_ = in_loop(dst, cur_loop) ? last_dupe(dst) : dst;
+              bool dst_in_loop = in_loop(unroll_data[dst].original, cur_loop);
+              auto dst_ = dst_in_loop ? last_dupe(dst) : dst;
               add_edge(cond, last_dupe(bb), dst_, is_back_edge(bb, dst));
             }
           }
