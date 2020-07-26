@@ -1211,6 +1211,7 @@ void Transform::preprocess() {
     };
 
     auto in_loop = [&](unsigned bb, unsigned loop_header) -> bool {
+      if (bb == loop_header) return true;
       auto bb_header = *lt.node_data[bb].first_header;
       
       while (bb_header) {
