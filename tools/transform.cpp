@@ -1093,8 +1093,12 @@ void Transform::preprocess() {
   }
 
   // INPUT : unroll factor : where to get it from?
-  auto k = 2;
-  
+  auto k = 1;
+
+  // DEBUG
+  auto loops_so_far = 0;
+  auto max_loops = 1;
+
   struct UnrollNodeData {
   private:
     unsigned dupe_counter_;
@@ -1108,6 +1112,7 @@ void Transform::preprocess() {
     std::optional<unsigned> last_dupe;
     // id of loop in which this bb was last duped in
     optional<unsigned> prev_loop_dupe;
+    bool pre_duped = false;
   };
 
   // Loop unrolling
@@ -1145,7 +1150,7 @@ void Transform::preprocess() {
       return *unroll_data[unroll_data[bb].original].last_dupe;
     };
 
-    auto dupe_bb = [&](unsigned bb) -> unsigned {
+    auto dupe_bb = [&](unsigned bb, unsigned header) -> unsigned {
       auto &bb_data = lt.node_data[bb];
       bb_data.id = bb;
 
@@ -1196,8 +1201,7 @@ void Transform::preprocess() {
       lt.nodes.push_back(id);
 
       // add duped bbs straight into the containing loop's body if it exists
-      auto fh = *lt.node_data[cur_loop].first_header;
-      auto h_data = &lt.node_data[fh]; // OR FIRST_HEADER?, anywhere im missing first_header? instead of header
+      auto h_data = &lt.node_data[header];
       while (h_data->id != lt.ROOT_ID) {
         lt.loop_data[h_data->id].nodes.push_back(id);
         h_data = &lt.node_data[*h_data->first_header];
@@ -1231,18 +1235,17 @@ void Transform::preprocess() {
       auto &src_data = lt.node_data[src];
       src_data.succs.emplace_back(cond, dst);
       lt.node_data[dst].preds.emplace_back(cond, src);
+
       auto instr = (JumpInstr*) &src_data.bb->back();
-      
       if (!replace) {
         instr->addTarget(cond, *lt.node_data[dst].bb);
       } else {
         bool replaced = instr->replaceTarget(cond, *lt.node_data[dst].bb);
-        // add in case it was not present
         if (!replaced)
           instr->addTarget(cond, *lt.node_data[dst].bb);
       }
       
-      // maintain topological ordering with the havlak preorder by
+      // enforce topological ordering with the havlak preorder by
       // ensuring that dst has a larger preorder than src.
       if (is_back_edge(src, dst)) {
         lt.nodes[lt.number[src]] = -1;
@@ -1254,22 +1257,10 @@ void Transform::preprocess() {
       } 
     };
 
-    auto duplicate_header = [&](unsigned header, unsigned n_first) -> unsigned {
-      auto duped_header = dupe_bb(header);
+    auto duplicate_header = [&](unsigned header, unsigned n) -> unsigned {
+      auto duped_header = dupe_bb(header, n);
       auto &duped_header_data = lt.node_data[duped_header];
       ((JumpInstr*) &duped_header_data.bb->back())->clearTargets();
-
-      auto &n_first_data = lt.node_data[n_first];
-      for (auto &[c, succ] : n_first_data.succs) {
-        if (!in_loop(succ, header))
-          add_edge(c, duped_header, succ, false);
-      }
-      
-      for (auto &[c, pred] : n_first_data.preds) {
-        if (in_loop(pred, header))
-          add_edge(c, last_dupe(pred), duped_header, is_back_edge(pred, n_first));
-        
-      }
       return duped_header;
     };
 
@@ -1278,19 +1269,8 @@ void Transform::preprocess() {
       lt.loop_data.reserve(lt.loop_data.size()+loop_size);
       auto &loop = lt.loop_data[cur_loop];
       loop_size = loop.nodes.size();
-
       for (unsigned i = 1; i < loop_size; ++i)
-        dupe_bb(loop.nodes[i]);
-      
-      for (auto bb : loop.nodes) {
-        if (bb == cur_loop) continue;
-        for (auto &[cond, dst] : lt.node_data[bb].succs) {
-          if (!is_back_edge(bb, unroll_data[dst].original)) {
-            auto dst_ = in_loop(dst, cur_loop) ? last_dupe(dst) : dst;
-            add_edge(cond, last_dupe(bb), dst_, false);
-          }
-        }
-      }
+        dupe_bb(loop.nodes[i], cur_loop);
     };
 
     vector<bool> visited;
@@ -1309,10 +1289,8 @@ void Transform::preprocess() {
           S.push(child_loop);
       } else {
         cur_loop = n;
-        if (prev_loop.has_value() && 
-            lt.node_data[*prev_loop].header != cur_loop)
-          seen_loops.clear();
-        seen_loops.push_back(n);
+        if (loops_so_far == max_loops) continue;
+        ++loops_so_far;
 
         // ignore loops not marked reducible // and irreducible
         auto n_type = lt.node_data[n].type;
@@ -1320,63 +1298,58 @@ void Transform::preprocess() {
             //n_type != LoopTree::LHeaderType::irreducible)
           continue; // if there is a irreducible loop nested this may break 
                     // the algorithm until irreducible support is added 
+
+        // pre-dupe all headers of loops that contain this one if not done yet
+        // in outer -> inner order
+        stack<unsigned> loops;
+        auto loop = n;
+        while (loop != lt.ROOT_ID) {
+          if (unroll_data[loop].pre_duped)
+            break;
+          loops.push(loop);
+          loop = *lt.node_data[loop].first_header;
+        }
+        while (!loops.empty()) {
+          loop = loops.top();
+          loops.pop();
+          unroll_data[loop].pre_duped = true;
+          auto n_ = duplicate_header(loop, loop);
+
+          for (auto &[c, dst] : lt.node_data[loop].succs)
+            if (!in_loop(dst, loop))
+              add_edge(c, n_, last_dupe(dst), false);
+          
+          for (auto &[c, pred] : lt.node_data[loop].preds)
+            if (in_loop(pred, loop))
+              add_edge(c, pred, n_, false);
+        }
         
-        unsigned n_first = n;
-        unsigned n_ = duplicate_header(n, n_first);
-        auto n_prev = n_;
+        auto n_prev = last_dupe(n);
         for (int i = 1; i < k; ++i) {
+          // create BB copies of the loop body
           duplicate_body();
-          n_ = duplicate_header(n_first, n_first);
+          // create BB copies of the loop header
+          auto n_ = duplicate_header(n, n);
 
-          for (auto &[c, dst] : lt.node_data[n_first].succs)
-            if (in_loop(dst, n_first))
+          // duped body edges
+          auto &loop = lt.loop_data[n].nodes;
+          auto loop_size = loop.size();
+          for (unsigned i = 1; i < loop_size; ++i) {
+            auto bb = loop[i];
+            for (auto &[cond, dst] : lt.node_data[bb].succs) {
+              auto dst_ = in_loop(dst, cur_loop) ? last_dupe(dst) : dst;
+              add_edge(cond, last_dupe(bb), dst_, false);
+            }
+          }
+
+          // duped header edges
+          for (auto &[c, dst] : lt.node_data[n].succs)
+            if (in_loop(dst, n))
               add_edge(c, n_prev, last_dupe(dst), false);
-
+            else
+              add_edge(c, n_, dst, false);
+         
           n_prev = n_;
-          
-          // Note, if we were to not duplicate header, and just the body
-          // we would need to replace all back edges of the last iteration
-          // with jumps to #sink
-        }
-
-        // TODO irreducible loops
-        // get the very last duped bb of each loop header and make sure
-        // the back-edge is a goto if it has a branch
-        for (auto seen_loop : seen_loops) {
-          auto final_duped_header = final_dupes[seen_loop];
-          auto instr = &lt.node_data[final_duped_header].bb->back();
-          if (auto br = dynamic_cast<Branch*>(instr)) {
-            if (br->getCond() != nullptr && br->getFalse() == nullptr)
-              br->setCond(nullptr);
-          }
-        }
-
-        // remove back-edges in succs and preds for n_first before containing
-        // loop's unroll
-        if (k > 1) {
-          auto &n_first_data = lt.node_data[n_first];
-          auto &n_first_preds = n_first_data.preds;
-          
-          for (unsigned i = 0; i < n_first_preds.size(); ++i) {
-            auto &pred = n_first_preds[i].second;
-            if (is_back_edge(pred, n_first)) {
-              n_first_preds.erase(n_first_preds.begin()+i);
-              auto &pred_succs = lt.node_data[pred].succs;
-              for (unsigned j = 0; j < pred_succs.size(); ++j)
-                if (pred_succs[j].second == n_first)
-                  pred_succs.erase(pred_succs.begin()+j);
-            }
-          }
-          
-          // add back-edges from last dupe to n_first to complete the 
-          // loop cycle for next unroll
-          // TODO, how will this work with multiple headers?
-          for (auto &[c, succ] : n_first_data.succs) {
-            if (in_loop(succ, n_first)) {
-              lt.node_data[last_dupe(n_first)].succs.emplace_back(c, succ);
-              lt.node_data[succ].preds.emplace_back(c, last_dupe(n_first));
-            }
-          }
         }
         prev_loop = cur_loop;
       }
@@ -1384,7 +1357,7 @@ void Transform::preprocess() {
     
     // Overwrite BB_order for the function to maintain proper topological order
     // ensuring that all edges in the unrolled CFG are forward edges
-    auto &bbs = fn->getBBs(); // TODO clear first
+    auto &bbs = fn->getBBs();
     bbs.clear();
     auto nodes_size = lt.nodes.size();
     for (unsigned i = 0; i < nodes_size; ++i) {
