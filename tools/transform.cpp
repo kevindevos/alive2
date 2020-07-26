@@ -1310,12 +1310,13 @@ void Transform::preprocess() {
         // in outer -> inner order
         stack<unsigned> loops;
         auto loop = n;
-        while (loop != lt.ROOT_ID) {
-          if (unroll_data[loop].pre_duped)
-            break;
-          loops.push(loop);
-          loop = *lt.node_data[loop].first_header;
+        if (!unroll_data[loop].pre_duped) {
+          while (loop != lt.ROOT_ID) {
+            loops.push(loop);
+            loop = *lt.node_data[loop].first_header;
+          }
         }
+  
         while (!loops.empty()) {
           loop = loops.top();
           loops.pop();
