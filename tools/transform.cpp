@@ -1248,11 +1248,8 @@ void Transform::preprocess() {
       // enforce topological ordering with the havlak preorder by
       // ensuring that dst has a larger preorder than src.
       if (is_back_edge(src, dst)) {
-        lt.nodes[lt.number[src]] = -1;
         lt.nodes[lt.number[dst]] = -1;
-        lt.number[src] = lt.nodes.size();
-        lt.number[dst] = lt.nodes.size() + 1;
-        lt.nodes.push_back(src);
+        lt.number[dst] = lt.nodes.size();
         lt.nodes.push_back(dst);
       } 
     };
