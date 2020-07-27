@@ -444,56 +444,6 @@ void LoopTree::buildLoopTree() {
   // Run DFS to build preorder numbering and the vecsets for analyze_loops
   DFS();
 
-  // fix_loops procedure: adds pseudo-bbs where needed in order to go around
-  // the limitation of not being able to assign multiple header types to the 
-  // same loop header
-  for (unsigned w_num = 0; w_num < nodes.size(); ++w_num) {
-    auto &w = nodes[w_num];
-    auto &w_data = node_data[w];
-    for (auto &v : w_data.preds) {
-      if (w_num <= number[v]) 
-        w_data.red_back_in.push_back(v);
-      else
-        w_data.other_in.push_back(v);
-    }
-    if (!w_data.red_back_in.empty() && w_data.other_in.size() > 1) {
-      auto &new_bb = new_bbs.emplace_back("#loop_"+w_data.bb->getName());
-      succ_override[&new_bb].push_back(w_data.bb); // w' -> w
-      
-      // for each predecessor of w, make them point to new bb instead
-      for (auto &v : w_data.other_in) {
-        auto v_bb = node_data[v].bb;
-        auto &v_sucessors = succ_override[v_bb];
-
-        // copy old sucessors except w
-        if (auto instr = dynamic_cast<const JumpInstr*>(&v_bb->back())) {
-          auto tgt_it = const_cast<JumpInstr*>(instr)->targets();
-          for (auto I = tgt_it.begin(), E = tgt_it.end(); I != E; ++I) {
-            auto t_bb = &(*I);
-            if (t_bb != w_data.bb)
-              v_sucessors.push_back(t_bb);
-          }
-        }
-        // add w' as sucessor to bb v instead of w
-        v_sucessors.push_back(&new_bb);
-      }
-    }
-  }
-
-  // if new bbs were created in fix_loops, rerun DFS for updated preorder
-  // numbering
-  if (!new_bbs.empty()) {
-    visited.clear();
-    bb_map.clear();
-    node_data.clear();
-    vecsets.clear();
-    vecsets_data.clear();
-    DFS();
-  }
-
-  for (auto &n_bb : new_bbs)
-    node_data[bb_map[&n_bb]].is_new = true;
-
   // analyze_loops
   // b. distinguish between back edges and non back edges
   unsigned nodes_size = nodes.size();
@@ -581,47 +531,14 @@ void LoopTree::buildLoopTree() {
           }
 
           // check if it is a valid loop header
-          // unrolling an invalid header would give no benefit
-          if (has_out_exit && has_out_entry && has_in_entry && has_in_exit) {
+          if (has_out_exit && has_out_entry && has_in_entry && has_in_exit)
             w_loop_data.alternate_headers.push_back(lnode);
-            auto &alt_data = node_data[lnode];
-            alt_data.header = w_data.header;
-            alt_data.type = w_data.type;
-          }
         }
       }
       loop_header_ids.push_back(w);
     }
     if (!w_num)
       break;
-  }
-
-  // update header for loops with a new bb inserted in fix_loops
-  for (auto w : loops_with_new_bb) {
-    auto &w_loop_data = loop_data[w];
-    if (!w_loop_data.alternate_headers.empty()) {
-      auto &new_w = w_loop_data.alternate_headers.front();
-      auto &new_w_loop_data = loop_data[new_w];
-      for (int i = w_loop_data.nodes.size() - 1; i >= 0; --i) {
-        auto &node = w_loop_data.nodes[i];
-        node_data[node].header = new_w;
-        if (node != w)
-          new_w_loop_data.nodes.push_back(node);
-        w_loop_data.nodes.erase(w_loop_data.nodes.end());
-      }
-      // update pointers for loop nesting tree after header swap
-      for (int i = w_loop_data.child_loops.size() - 1; i >= 0; --i) {
-        new_w_loop_data.child_loops.push_back(w_loop_data.child_loops[i]);
-        w_loop_data.child_loops.erase(w_loop_data.child_loops.end());
-      }
-      auto &hdr_hdr = loop_data[node_data[w].header];
-      auto siz = hdr_hdr.child_loops.size();
-      for (unsigned i = 0; i < siz; ++i) {
-        auto &cl = hdr_hdr.child_loops[i];
-        if (cl == w)
-          cl = new_w;
-      }
-    }
   }
 }
 

@@ -245,8 +245,6 @@ class LoopTree final {
   // bb id of loop header -> loop data
   std::vector<LoopData> loop_data;
 
-  // new_bbs holds bbs added in fix_loops
-  std::vector<BasicBlock> new_bbs; 
   std::vector<NodeData> node_data;
 
   unsigned vecsetFind(unsigned bb);
