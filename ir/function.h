@@ -202,7 +202,7 @@ public:
   public:
     unsigned id;
     BasicBlock *bb;
-    std::vector<std::pair<Value*, unsigned>> preds; // either back or non-back preds
+    std::vector<std::pair<Value*, unsigned>> preds; 
     std::vector<std::pair<Value*, unsigned>> succs;
     std::vector<unsigned> non_back_preds;
     std::vector<unsigned> back_preds;

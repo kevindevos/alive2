@@ -1106,6 +1106,9 @@ void Transform::preprocess() {
     unsigned id;
     // the bb from which id was duped
     unsigned original;
+    // equal to the first preorder assigned to the original, or it's number
+    // if it is not it's own original
+    unsigned first_preorder;
     // the bb in original CFG from which this has been duped
     shared_ptr<unsigned> dupe_counter = make_shared<unsigned>(dupe_counter_);
     std::optional<unsigned> last_dupe;
@@ -1118,11 +1121,13 @@ void Transform::preprocess() {
   for (auto fn : { &src, &tgt }) {
     CFG cfg(*fn);
     LoopTree lt(*fn, cfg);
-    vector<unsigned> duped_bbs;
     unsigned last_non_duped_id = lt.node_data.size()-1;
     vector<UnrollNodeData> unroll_data;
     unsigned cur_loop; // current loop being unrolled
     optional<unsigned> prev_loop; // loop unrolled before current
+    // keep nodes that are inconsistent with topological order for fixing
+    // after each loop unroll
+    set<unsigned> to_fix_top_order;
 
     // Prepare data structure for unroll algorithm
     for (auto node : lt.node_data) {
@@ -1131,6 +1136,7 @@ void Transform::preprocess() {
       u_data.id = node.id;
       u_data.original = node.id;
       u_data.last_dupe = node.id;
+      u_data.first_preorder = lt.number[node.id];
     }
 
     // debug print dot file src before unroll
@@ -1171,13 +1177,18 @@ void Transform::preprocess() {
       ins_n_data.first_header = *bb_data.first_header;
 
       auto &u_ins_data = unroll_data[id];
+
+      lt.number.push_back(lt.nodes.size());
+      lt.nodes.push_back(id);
       
       // if bb was last duped in a different loop, make it the new original
       u_ins_data.original = u_bb_data.original;
+      u_ins_data.first_preorder = lt.number[id];
       if (u_bb_data.prev_loop_dupe.has_value() && 
           u_bb_data.prev_loop_dupe != cur_loop) {
         u_ins_data.original = bb;
         u_bb_data.original = bb;
+        u_ins_data.first_preorder = lt.number[bb];
       } 
       
       u_bb_data.prev_loop_dupe = cur_loop;
@@ -1185,9 +1196,6 @@ void Transform::preprocess() {
       unroll_data[u_ins_data.original].last_dupe = id;
       u_ins_data.dupe_counter = unroll_data[u_ins_data.original].dupe_counter;
       u_ins_data.id = id;
-      
-      lt.number.push_back(lt.nodes.size());
-      lt.nodes.push_back(id);
 
       // add duped bbs straight into the containing loop's body if it exists
       auto &fh = lt.node_data[header].first_header;
@@ -1220,6 +1228,14 @@ void Transform::preprocess() {
     auto is_back_edge = [&](unsigned src, unsigned dst) -> bool {
       return lt.number[src] > lt.number[dst];
     };
+
+    auto top_move_back = [&](unsigned bb) {
+      lt.nodes[lt.number[bb]] = -1;
+      lt.number[bb] = lt.nodes.size();
+      lt.nodes.push_back(bb);
+      if (bb != unroll_data[bb].original)
+        unroll_data[bb].first_preorder = lt.number[bb];
+    };
     
     auto add_edge = [&](Value *cond, unsigned src, unsigned dst, bool replace) {
       auto &src_data = lt.node_data[src];
@@ -1240,9 +1256,9 @@ void Transform::preprocess() {
       // enforce topological ordering with the havlak preorder by
       // ensuring that dst has a larger preorder than src.
       if (is_back_edge(src, dst)) {
-        lt.nodes[lt.number[dst]] = -1;
-        lt.number[dst] = lt.nodes.size();
-        lt.nodes.push_back(dst);
+        top_move_back(dst);
+        if (dst == unroll_data[dst].original)
+          to_fix_top_order.insert(dst);
       } 
     };
 
@@ -1304,13 +1320,15 @@ void Transform::preprocess() {
           unroll_data[loop].pre_duped = true;
           auto n_ = duplicate_header(loop, loop);
 
-          for (auto &[c, dst] : lt.node_data[loop].succs)
+          for (auto &[c, dst] : lt.node_data[loop].succs) {
             if (!in_loop(dst, loop))
               add_edge(c, n_, last_dupe(dst), false);
+          }
           
-          for (auto &[c, pred] : lt.node_data[loop].preds)
+          for (auto &[c, pred] : lt.node_data[loop].preds) {
             if (in_loop(pred, loop))
               add_edge(c, pred, n_, is_back_edge(pred, loop));
+          }
         }
         
         auto n_prev = last_dupe(n);
@@ -1319,7 +1337,7 @@ void Transform::preprocess() {
           duplicate_body();
           auto n_ = duplicate_header(n, n);
 
-          // duped body edges
+          // dupe body edges
           auto &loop = lt.loop_data[n].nodes;
           auto loop_size = loop.size();
           for (unsigned i = 1; i < loop_size; ++i) {
@@ -1331,7 +1349,7 @@ void Transform::preprocess() {
             }
           }
 
-          // duped header edges
+          // dupe header edges
           for (auto &[c, dst] : lt.node_data[n].succs) {
             if (in_loop(dst, n))
               add_edge(c, n_prev, last_dupe(dst), false);
@@ -1341,6 +1359,39 @@ void Transform::preprocess() {
           n_prev = n_;
         }
         prev_loop = cur_loop;
+      }
+
+      // adjust topological order for nodes that are inconsistent after 
+      // the last containing loop was unrolled
+      if (prev_loop && lt.node_data[*prev_loop].header == lt.ROOT_ID) {
+        stack<unsigned> worklist;
+        vector<pair<bool, unsigned>> fix_visited; // bool visited, root node
+        fix_visited.resize(lt.node_data.size());
+
+        for (auto root : to_fix_top_order) {
+          // if this root wasn't visited, push into worklist
+          if (!fix_visited[root].first)
+            worklist.push(root);
+          
+          while (!worklist.empty()) {
+            auto cur = worklist.top();
+            worklist.pop();
+
+            // only visit nodes not visited by current root
+            if (fix_visited[cur].first && fix_visited[cur].second == root)
+              continue;
+            fix_visited[cur].first = true;
+            fix_visited[cur].second = root;
+            top_move_back(cur);
+
+            for (auto succ : lt.node_data[cur].succs) {
+              if (!is_back_edge(unroll_data[cur].first_preorder, 
+                                unroll_data[succ.second].first_preorder))
+                worklist.push(succ.second);
+            }
+          }
+        }
+        prev_loop.reset();
       }
     }
     
