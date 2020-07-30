@@ -1097,7 +1097,7 @@ void Transform::preprocess() {
 
   // DEBUG
   auto loops_so_far = 0;
-  auto max_loops = 3;
+  auto max_loops = 99;
 
   struct UnrollNodeData {
   private:
@@ -1136,10 +1136,6 @@ void Transform::preprocess() {
     // debug print dot file src before unroll
     ofstream f1("src.dot");
     cfg.printDot(f1);
-
-    // TODO - irreducible loops, havlak adds bb's, so i need to include them 
-    // as normal bbs, although just empty with a jump instr with the targets
-    // it requires
 
     auto last_dupe = [&](unsigned bb) -> unsigned {
       return *unroll_data[unroll_data[bb].original].last_dupe;
@@ -1225,10 +1221,6 @@ void Transform::preprocess() {
       return lt.number[src] > lt.number[dst];
     };
     
-    // TODO problem: choosing alternate headers after havlak may
-    // break unroll, as the arrangement of edges should be different
-    // i may need to postpone the alternate header selection to after unroll
-    // or adjust the edges in havlak
     auto add_edge = [&](Value *cond, unsigned src, unsigned dst, bool replace) {
       auto &src_data = lt.node_data[src];
       auto instr = (JumpInstr*) &src_data.bb->back();
@@ -1291,10 +1283,9 @@ void Transform::preprocess() {
 
         // ignore loops not marked reducible // and irreducible
         auto n_type = lt.node_data[n].type;
-        if (n_type != LoopTree::LHeaderType::reducible) //&&
-            //n_type != LoopTree::LHeaderType::irreducible)
-          continue; // if there is a irreducible loop nested this may break 
-                    // the algorithm until irreducible support is added 
+        if (n_type != LoopTree::LHeaderType::reducible &&
+            n_type != LoopTree::LHeaderType::irreducible)
+          continue;
 
         // pre-dupe all headers of loops that contain this one if not done yet
         // in outer -> inner order
@@ -1342,15 +1333,11 @@ void Transform::preprocess() {
 
           // duped header edges
           for (auto &[c, dst] : lt.node_data[n].succs) {
-            // debug
-            auto dst_ = last_dupe(dst);
-            (void)dst_;
             if (in_loop(dst, n))
               add_edge(c, n_prev, last_dupe(dst), false);
             else
               add_edge(c, n_, dst, false);
           }
-         
           n_prev = n_;
         }
         prev_loop = cur_loop;
@@ -1361,9 +1348,10 @@ void Transform::preprocess() {
     // ensuring that all edges in the unrolled CFG are forward edges
     auto &bbs = fn->getBBs();
     bbs.clear();
+    int id = 0;
     auto nodes_size = lt.nodes.size();
     for (unsigned i = 0; i < nodes_size; ++i) {
-      auto id = lt.nodes[i];
+      id = lt.nodes[i];
       if (id != -1)
         bbs.emplace_back(lt.node_data[id].bb);
     }
