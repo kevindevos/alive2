@@ -206,7 +206,6 @@ class LoopTree final {
     std::vector<unsigned> other_in;
     unsigned header;
     LHeaderType type;
-    bool is_new;
   };
 
   struct LoopData {

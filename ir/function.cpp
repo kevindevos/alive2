@@ -467,7 +467,6 @@ void LoopTree::buildLoopTree() {
   node_data[0].header = 0;
   unordered_set<unsigned> P;
   stack<unsigned> work_list;
-  vector<unsigned> loops_with_new_bb;
   for (unsigned w_num = nodes_size - 1; ; --w_num) {
     auto &w = nodes[w_num];
     P.clear();
@@ -504,9 +503,6 @@ void LoopTree::buildLoopTree() {
           loop_data[w].child_loops.push_back(x);
         vecsetUnion(x, w);
       }
-
-      if (node_data[w].is_new)
-        loops_with_new_bb.push_back(w);
 
       auto &w_loop_data = loop_data[w];
       bool has_out_exit, has_out_entry, has_in_entry, has_in_exit;
@@ -562,8 +558,6 @@ void LoopTree::printDot(std::ostream &os) const {
     auto &n_loop_data = loop_data[n];
     auto &n_data = node_data[n];
     auto bb = n;
-    if (n_data.is_new)
-      bb = n_loop_data.alternate_headers.front();
 
     cout << bb_dot_name(node_data[bb].bb->getName()) << " -> (";
     for (auto el : n_loop_data.nodes) {
@@ -577,7 +571,6 @@ void LoopTree::printDot(std::ostream &os) const {
   for (auto n : nodes) {
     auto &node = node_data[n];
     auto &node_loop_data = loop_data[n];
-    if (node.is_new && !node_loop_data.alternate_headers.empty()) continue;
     auto header_id = node.header;
     auto &header_loop_data = loop_data[node.header];
     if (!header_loop_data.alternate_headers.empty())
