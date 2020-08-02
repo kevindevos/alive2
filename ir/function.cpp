@@ -363,10 +363,10 @@ void LoopTree::vecsetUnion(unsigned from, unsigned to) {
 // Nesting of Reducible and Irreducible Loops.
 void LoopTree::buildLoopTree() {
   vector<bool> visited; // bb id -> visited
-  
+
   // used in DFS to override sucessor list of a bb when fix_loops added new bbs
   unordered_map<const BasicBlock*, vector<const BasicBlock*>> succ_override;
-  
+
   // reserve more than total number of blocks to prevent necessary
   // reallocation when adding new bbs in procedure fix_loops
   vecsets_data.reserve(2*f.getBBs().size());
@@ -384,12 +384,12 @@ void LoopTree::buildLoopTree() {
     }
     return I->second;
   };
-  
+
   // check if bb with preorder w is an ancestor of bb with preorder v
   auto isAncestor = [&](unsigned w, unsigned v) {
     return w <= v && v <= last[w];
   };
-  
+
   // DFS to establish node ordering
   auto DFS = [&]() {
     stack<const BasicBlock*> dfs_work_list;
@@ -414,7 +414,7 @@ void LoopTree::buildLoopTree() {
       nodes[current] = n;
       auto &cur_node_data = node_data[n];
       cur_node_data.bb = cur_bb;
-      
+
       if (!visited[n]) {
         visited[n] = true;
         number[n] = current++;
@@ -460,7 +460,7 @@ void LoopTree::buildLoopTree() {
     }
   }
 
-  // c. d. e. 
+  // c. d. e.
   // for each node with incoming reducible backedge, builds a set of bbs
   // that represents the loop, sets the loop header and type
   loop_data.resize(nodes_size);
@@ -504,7 +504,7 @@ void LoopTree::buildLoopTree() {
           loop_data[w].child_loops.push_back(x);
         vecsetUnion(x, w);
       }
-     
+
       if (node_data[w].is_new)
         loops_with_new_bb.push_back(w);
 
@@ -518,14 +518,14 @@ void LoopTree::buildLoopTree() {
           // check predecessors
           for (auto pred : lnode_data.preds) {
             if (vecsetFind(pred) != w)
-              has_out_entry = true; // (pred, lnode) : x not in loop 
+              has_out_entry = true; // (pred, lnode) : x not in loop
             else
               has_in_entry = true; // (pred, lnode) : x in loop
           }
           // check sucessors
           for (auto succ : lnode_data.succs) {
             if (vecsetFind(succ) != w)
-              has_out_exit = true; // (lnode, x) : x not in loop 
+              has_out_exit = true; // (lnode, x) : x not in loop
             else
               has_in_exit = true; // (lnode, x) : x in loop
           }
@@ -552,7 +552,7 @@ std::vector<LoopTree::LoopData>* LoopTree::getLoopData() {
 
 void LoopTree::printDot(std::ostream &os) const {
   os << "digraph {\n";
-  
+
   vector<string> lheader_names {
     "none", "nonheader", "self", "reducible", "irreducible"
   };
@@ -587,19 +587,19 @@ void LoopTree::printDot(std::ostream &os) const {
     if (header_bb == &f.getFirstBB() && node.bb == header_bb)
       continue;
     auto shape = header_bb == &f.getFirstBB() ? "box" : "oval";
-    os << '"' << bb_dot_name(header_bb->getName()) << "\"[label=<" 
+    os << '"' << bb_dot_name(header_bb->getName()) << "\"[label=<"
        << bb_dot_name(header_bb->getName())
-       << "<BR /><FONT POINT" 
-       << "-SIZE=\"10\">" << lheader_names[node_data[header_id].type] 
+       << "<BR /><FONT POINT"
+       << "-SIZE=\"10\">" << lheader_names[node_data[header_id].type]
        << "</FONT>>][shape="<< shape <<"];\n";
     os << '"' << bb_dot_name(header_bb->getName()) << "\" -> \""
        << bb_dot_name(node.bb->getName()) << "\";\n";
-    os << '"' << bb_dot_name(node.bb->getName()) << "\"[label=<" 
+    os << '"' << bb_dot_name(node.bb->getName()) << "\"[label=<"
        << bb_dot_name(node.bb->getName())
-       << "<BR /><FONT POINT-SIZE=\"10\">" << lheader_names[node.type] 
+       << "<BR /><FONT POINT-SIZE=\"10\">" << lheader_names[node.type]
        << "</FONT>>]"<<";\n";
   }
- 
+
   os << "}\n";
 }
 
@@ -632,7 +632,7 @@ void DomTree::buildDominators() {
   }
 
   // Adaptation of the algorithm in the article
-  // Cooper, Keith D.; Harvey, Timothy J.; and Kennedy, Ken (2001). 
+  // Cooper, Keith D.; Harvey, Timothy J.; and Kennedy, Ken (2001).
   // A Simple, Fast Dominance Algorithm
   // http://www.cs.rice.edu/~keith/EMBED/dom.pdf
   // Makes multiple passes when CFG is cyclic to update incorrect initial
@@ -644,7 +644,7 @@ void DomTree::buildDominators() {
       auto &b_node = doms.at(b);
       if (b_node.preds.empty())
         continue;
-      
+
       auto new_idom = b_node.preds.front();
       for (auto p : b_node.preds) {
         if (p->dominator != nullptr) {
@@ -698,5 +698,5 @@ void DomTree::printDot(std::ostream &os) const {
   os << "}\n";
 }
 
-} 
+}
 

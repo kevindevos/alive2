@@ -193,8 +193,8 @@ class LoopTree final {
   Function &f;
   CFG cfg;
 
-  enum LHeaderType { 
-    none = 0, nonheader = 1, self = 2, reducible = 3, irreducible = 4 
+  enum LHeaderType {
+    none = 0, nonheader = 1, self = 2, reducible = 3, irreducible = 4
   };
   struct NodeData {
     const BasicBlock *bb;
@@ -230,7 +230,7 @@ class LoopTree final {
       void clear() { bb_set.clear(); }
   };
   // "sets" for union and find operations
-  std::vector<unsigned> number; // bb id -> preorder 
+  std::vector<unsigned> number; // bb id -> preorder
   std::vector<unsigned> nodes; // preorder -> bb id
   std::vector<unsigned> last; // preorder -> preorder
   // vector of pointers to allow efficient UNION and FIND operations

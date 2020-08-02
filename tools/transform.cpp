@@ -1052,7 +1052,7 @@ void Transform::preprocess() {
       if (vis)
         continue;
       vis = true;
-      
+
       if (auto instr = dynamic_cast<const JumpInstr*>(&bb->back())) {
         auto tgt_it = const_cast<JumpInstr*>(instr)->targets();
         for (auto I = tgt_it.begin(), E = tgt_it.end(); I != E; ++I) {
@@ -1061,7 +1061,7 @@ void Transform::preprocess() {
         }
       }
     }
-    
+
     // check if any bb was not reached before finding them
     vector<BasicBlock*> to_remove;
     if (visited.size() != fn->getBBs().size()) {
