@@ -103,6 +103,11 @@ static llvm::cl::opt<bool> opt_io_nobuiltin(
     llvm::cl::desc("Encode standard I/O functions as an unknown function"),
     llvm::cl::cat(opt_alive), llvm::cl::init(false));
 
+static llvm::cl::opt<unsigned> opt_unroll_factor(
+    "tv-unroll-factor",
+    llvm::cl::desc("Unroll factor for unrolling (disabled with value 0)"),
+    llvm::cl::cat(opt_alive), llvm::cl::init(0));
+
 static llvm::cl::opt<unsigned> opt_max_mem(
      "max-mem", llvm::cl::desc("Max memory (approx)"),
      llvm::cl::cat(opt_alive), llvm::cl::init(1024), llvm::cl::value_desc("MB"));
@@ -273,7 +278,7 @@ static void compareFunctions(llvm::Function &F1, llvm::Function &F2,
   Transform t;
   t.src = move(*Func1);
   t.tgt = move(*Func2);
-  t.preprocess();
+  t.preprocess(opt_unroll_factor.getValue());
   TransformVerify verifier(t, false);
   if (!opt_succinct)
     t.print(cout, print_opts);

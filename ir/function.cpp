@@ -104,6 +104,12 @@ const BasicBlock* Function::getBBIfExists(std::string_view name) const {
   return I != BBs.end() ? &I->second : nullptr;
 }
 
+BasicBlock* Function::addBB(BasicBlock &&bb) {
+  auto [b, inserted] = BBs.emplace(bb.getName(), move(bb));
+  BB_order.push_back(&b->second);
+  return &b->second;
+}
+
 void Function::removeBB(BasicBlock &BB) {
   BBs.erase(BB.getName());
 
@@ -415,6 +421,7 @@ void LoopTree::buildLoopTree() {
       nodes[current] = n;
       auto &cur_node_data = node_data[n];
       cur_node_data.bb = const_cast<BasicBlock*>(cur_bb);
+
       if (!visited[n]) {
         visited[n] = true;
         number[n] = current++;
@@ -471,6 +478,7 @@ void LoopTree::buildLoopTree() {
   node_data[0].header = 0;
   unordered_set<unsigned> P;
   stack<unsigned> work_list;
+  vector<unsigned> loops_with_new_bb;
   for (unsigned w_num = nodes_size - 1; ; --w_num) {
     auto w = (unsigned) nodes[w_num];
     P.clear();
@@ -588,7 +596,10 @@ void LoopTree::printDot(std::ostream &os) const {
   // temporary print loop sets
   for (auto &n : loop_header_ids) {
     auto &n_loop_data = loop_data[n];
+    auto &n_data = node_data[n];
     auto bb = n;
+    if (n_data.added_in_fix_loops)
+      bb = n_loop_data.alternate_headers.front();
 
     cout << bb_dot_name(node_data[bb].bb->getName()) << " -> (";
     for (auto el : n_loop_data.nodes) {
@@ -619,6 +630,7 @@ void LoopTree::printDot(std::ostream &os) const {
        << "<BR /><FONT POINT-SIZE=\"10\">" << lheader_names[node.type]
        << "</FONT>>]"<<";\n";
   }
+
   os << "}\n";
 }
 
