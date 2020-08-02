@@ -334,6 +334,7 @@ public:
     target_iterator() {}
     target_iterator(JumpInstr *instr, unsigned idx) : instr(instr), idx(idx) {}
     const BasicBlock& operator*() const;
+    std::pair<Value*, const BasicBlock&> get() const;
     target_iterator& operator++(void) { ++idx; return *this; }
     bool operator!=(target_iterator &rhs) const { return idx != rhs.idx; }
     bool operator==(target_iterator &rhs) const { return !(*this != rhs); }
@@ -352,16 +353,17 @@ public:
 
 class Branch final : public JumpInstr {
   Value *cond = nullptr;
-  const BasicBlock &dst_true, *dst_false = nullptr;
+  BasicBlock *dst_true, *dst_false = nullptr;
 public:
-  Branch(const BasicBlock &dst) : JumpInstr(Type::voidTy, "br"), dst_true(dst) {}
+  Branch(BasicBlock &dst) : JumpInstr(Type::voidTy, "br"), dst_true(&dst) {}
 
-  Branch(Value &cond, const BasicBlock &dst_true, const BasicBlock &dst_false)
-    : JumpInstr(Type::voidTy, "br"), cond(&cond), dst_true(dst_true),
+  Branch(Value &cond, BasicBlock &dst_true, BasicBlock &dst_false)
+    : JumpInstr(Type::voidTy, "br"), cond(&cond), dst_true(&dst_true),
     dst_false(&dst_false) {}
 
-  auto& getTrue() const { return dst_true; }
-  auto getFalse() const { return dst_false; }
+  auto getTrue() { return dst_true; }
+  auto getFalse() { return dst_false; }
+  auto getCond() { return cond; }
   std::vector<Value*> operands() const override;
   void rauw(const Value &what, Value &with) override;
   void print(std::ostream &os) const override;
@@ -373,19 +375,19 @@ public:
 
 class Switch final : public JumpInstr {
   Value *value;
-  const BasicBlock &default_target;
-  std::vector<std::pair<Value*, const BasicBlock&>> targets;
+  BasicBlock *default_target;
+  std::vector<std::pair<Value*, BasicBlock*>> targets;
 
 public:
-  Switch(Value &value, const BasicBlock &default_target)
+  Switch(Value &value, BasicBlock &default_target)
     : JumpInstr(Type::voidTy, "switch"), value(&value),
-      default_target(default_target) {}
+      default_target(&default_target) {}
 
-  void addTarget(Value &val, const BasicBlock &target);
-
+  void addTarget(Value &val, BasicBlock &target);
   auto getNumTargets() const { return targets.size(); }
   auto& getTarget(unsigned i) const { return targets[i]; }
-  auto& getDefault() const { return default_target; }
+  auto getDefault() const { return default_target; }
+  auto getDefaultValue() const { return value; }
 
   std::vector<Value*> operands() const override;
   void rauw(const Value &what, Value &with) override;
@@ -472,7 +474,7 @@ public:
   virtual ByteAccessInfo getByteAccessInfo() const = 0;
 };
 
- 
+
 class Alloc final : public MemInstr {
   Value *size, *mul;
   unsigned align;

@@ -190,30 +190,36 @@ public:
 };
 
 class LoopTree final {
-  Function &f;
-  CFG cfg;
-
+public:
   enum LHeaderType {
     none = 0, nonheader = 1, self = 2, reducible = 3, irreducible = 4
   };
+  const unsigned ROOT_ID = 0;
+
   struct NodeData {
-    const BasicBlock *bb;
-    std::vector<unsigned> preds; // either back or non-back preds
-    std::vector<unsigned> succs;
+  public:
+    unsigned id;
+    BasicBlock *bb;
+    std::vector<std::pair<Value*, unsigned>> preds;
+    std::vector<std::pair<Value*, unsigned>> succs;
     std::vector<unsigned> non_back_preds;
     std::vector<unsigned> back_preds;
     std::vector<unsigned> red_back_in;
     std::vector<unsigned> other_in;
     unsigned header;
+    std::optional<unsigned> first_header;
     LHeaderType type;
   };
 
   struct LoopData {
-    unsigned node_id;
+    unsigned id;
     std::vector<unsigned> nodes;
     std::vector<unsigned> alternate_headers;
     std::vector<unsigned> child_loops;
   };
+private:
+  Function &f;
+  CFG cfg;
 
   // A vector disguised as a set that can be hidden and point to another
   // vecset for convenient union operations
@@ -228,9 +234,7 @@ class LoopTree final {
       void add(unsigned bb) { bb_set.push_back(bb); }
       void clear() { bb_set.clear(); }
   };
-  // "sets" for union and find operations
-  std::vector<unsigned> number; // bb id -> preorder
-  std::vector<unsigned> nodes; // preorder -> bb id
+
   std::vector<unsigned> last; // preorder -> preorder
   // vector of pointers to allow efficient UNION and FIND operations
   std::vector<Vecset*> vecsets;
@@ -241,18 +245,21 @@ class LoopTree final {
 
   // bb -> bb id
   std::unordered_map<const BasicBlock*, unsigned> bb_map;
-  // bb id of loop header -> loop data
-  std::vector<LoopData> loop_data;
-
-  std::vector<NodeData> node_data;
 
   unsigned vecsetFind(unsigned bb);
   void vecsetUnion(unsigned from, unsigned to);
   void buildLoopTree();
 public:
+  std::vector<NodeData> node_data;
+  // bb id of loop header -> loop data
+  std::vector<LoopData> loop_data;
+
+  // "sets" for union and find operations
+  std::vector<unsigned> number; // bb id ->  preorder
+  std::vector<int> nodes; // preorder -> bb id // (ascending preorder)
+
+  unsigned loopCount() { return loop_header_ids.size(); }
   LoopTree(Function &f, CFG &cfg) : f(f), cfg(cfg) { buildLoopTree(); }
-  std::vector<NodeData>* getNodeData();
-  std::vector<LoopData>* getLoopData();
   void printDot(std::ostream &os) const;
 };
 
