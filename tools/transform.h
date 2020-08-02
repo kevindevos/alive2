@@ -22,7 +22,7 @@ struct Transform {
   IR::Function src, tgt;
   IR::Predicate *precondition = nullptr;
 
-  void preprocess();
+  void preprocess(unsigned unroll_factor);
   void print(std::ostream &os, const TransformPrintOpts &opt) const;
   friend std::ostream& operator<<(std::ostream &os, const Transform &t);
 };

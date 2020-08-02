@@ -110,6 +110,11 @@ llvm::cl::opt<bool> opt_io_nobuiltin(
     llvm::cl::desc("Encode standard I/O functions as an unknown function"),
     llvm::cl::init(false));
 
+llvm::cl::opt<unsigned> opt_unroll_factor(
+    "tv-unroll-factor",
+    llvm::cl::desc("Unroll factor for unrolling (disabled with value 0)"),
+    llvm::cl::init(0));
+
 ostream *out;
 ofstream out_file;
 string report_filename;
@@ -183,7 +188,7 @@ struct TVPass final : public llvm::FunctionPass {
     Transform t;
     t.src = move(old_fn);
     t.tgt = move(I->second.first);
-    t.preprocess();
+    t.preprocess(opt_unroll_factor.getValue());
     TransformVerify verifier(t, false);
     t.print(*out, print_opts);
 

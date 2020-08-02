@@ -33,6 +33,7 @@ public:
   BasicBlock(std::string_view name) : name(name) {}
 
   const std::string& getName() const { return name; }
+  void setName(const std::string &name_) { name = name_; }
 
   smt::expr getTypeConstraints(const Function &f) const;
   void fixupTypes(const smt::Model &m);
@@ -95,6 +96,7 @@ public:
   BasicBlock& getBB(std::string_view name, bool push_front = false);
   const BasicBlock& getBB(std::string_view name) const;
   const BasicBlock* getBBIfExists(std::string_view name) const;
+  BasicBlock* addBB(BasicBlock &&bb);
   void removeBB(BasicBlock &BB);
 
   void addConstant(std::unique_ptr<Value> &&c);
@@ -209,6 +211,7 @@ public:
     unsigned header;
     std::optional<unsigned> first_header;
     LHeaderType type;
+    bool added_in_fix_loops;
   };
 
   struct LoopData {
