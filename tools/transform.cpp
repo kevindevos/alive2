@@ -1149,9 +1149,14 @@ void Transform::preprocess(unsigned unroll_factor) {
         u_data.first_original = node.id;
       }
 
-      // debug print dot file src before unroll
-      ofstream f1("src.dot");
-      cfg.printDot(f1);
+      // debug print cfg and loop tree
+      if (config::debug) {
+        if (fn == &tgt) continue;
+        ofstream f1("src.dot");
+        cfg.printDot(f1);
+        ofstream f2("loop.dot");
+        lt.printDot(f2);
+      }
 
       auto last_dupe = [&](unsigned bb) -> unsigned {
         return *unroll_data[unroll_data[bb].original].last_dupe;
@@ -1460,10 +1465,11 @@ void Transform::preprocess(unsigned unroll_factor) {
       }
 
       // DEBUG , print unrolled dot for src only
-      if (fn == &src) {
+      if (config::debug) {
+        if (fn == &tgt) continue;
         CFG cfg_(*fn);
-        ofstream f2("src_unrolled.dot");
-        cfg_.printDot(f2);
+        ofstream f1("src_unrolled.dot");
+        cfg_.printDot(f1);
       }
     }
   }
