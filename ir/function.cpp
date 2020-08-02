@@ -475,6 +475,8 @@ void LoopTree::buildLoopTree() {
     auto w = (unsigned) nodes[w_num];
     P.clear();
     auto &w_data = node_data[w];
+    auto &w_loop_data = loop_data[w];
+
     for (auto v : w_data.back_preds) {
       if (v != w) {
         auto v_repr = vecsetFind(v);
@@ -484,8 +486,10 @@ void LoopTree::buildLoopTree() {
         w_data.type = LHeaderType::self;
       }
     }
+
     if (!P.empty())
       w_data.type = LHeaderType::reducible;
+
     while (!work_list.empty()) {
       auto x = work_list.top();
       work_list.pop();
@@ -500,49 +504,66 @@ void LoopTree::buildLoopTree() {
         }
       }
     }
+
     if (!P.empty()) {
-      auto &w_loop_data = loop_data[w];
+      // Union x into w regardless of valid loop or not, if not it will be in
+      // a possible valid containing loop
       for (auto x : P) {
-        auto &x_data = node_data[x];
-        x_data.header = w;
-        if (!x_data.first_header)
-          x_data.first_header = w;
-        if (!loop_data[x].nodes.empty())
-          w_loop_data.child_loops.push_back(x);
         vecsetUnion(x, w);
-      }
-      loop_header_ids.push_back(w);
-      for (auto node : vecsets[w]->getAll()) {
-        w_loop_data.nodes.push_back(node);
+        node_data[x].header = w;
       }
 
+      bool valid_loop = true;
       bool has_out_exit, has_out_entry, has_in_entry, has_in_exit;
+      (void)has_out_exit;
       for (auto lnode : vecsets[w]->getAll()) {
         has_out_exit = has_out_entry = has_in_entry = has_in_exit = false;
-        if (lnode != w && loop_data[lnode].nodes.empty()) {
-          auto &lnode_data = node_data[lnode];
+        auto &lnode_data = node_data[lnode];
 
-          for (auto &[c, pred] : lnode_data.preds) {
-            (void)c;
-            if (vecsetFind(pred) != w)
-              has_out_entry = true; // (pred, lnode) : x not in loop
-            else
-              has_in_entry = true; // (pred, lnode) : x in loop
-          }
-          for (auto &[c, succ] : lnode_data.succs) {
-            (void)c;
-            if (vecsetFind(succ) != w)
-              has_out_exit = true; // (lnode, x) : x not in loop
-            else
-              has_in_exit = true; // (lnode, x) : x in loop
-          }
+        for (auto &[c, pred] : lnode_data.preds) {
+          (void)c;
+          if (vecsetFind(pred) != w)
+            has_out_entry = true; // (x, lnode) : x not in loop
+          else
+            has_in_entry = true; // (x, lnode) : x in loop
+        }
 
-          // check if it is a valid loop header
-          if (has_out_exit && has_out_entry && has_in_entry && has_in_exit) {
+        for (auto &[c, succ] : lnode_data.succs) {
+          (void)c;
+          if (vecsetFind(succ) != w)
+            has_out_exit = true; // (lnode, x) : x not in loop
+          else
+            has_in_exit = true; // (lnode, x) : x in loop
+        }
+
+        // check if it is a valid loop header
+        if (has_out_entry && has_in_entry && has_in_exit) {
+          if (lnode != w)
             w_loop_data.alternate_headers.push_back(lnode);
+        } else {
+          // if chosen header is invalid do not keep this loop
+          if (lnode == w) {
+            valid_loop = false;
+            lnode_data.type = LHeaderType::nonheader;
+            break;
+          }
+        }
+
+        // if a node "in" the loop has no outgoing edge into another node
+        // in this loop or no incoming edge from a node in the loop,
+        // then it is not part of the loop
+        if (has_in_exit && has_in_entry) {
+          w_loop_data.nodes.push_back(lnode);
+          if (lnode != w) {
+            if (!loop_data[lnode].nodes.empty())
+              w_loop_data.child_loops.push_back(lnode);
+            if (!lnode_data.first_header)
+              lnode_data.first_header = w;
           }
         }
       }
+      if (valid_loop)
+        loop_header_ids.push_back(w);
     }
     if (!w_num)
       break;
@@ -579,10 +600,7 @@ void LoopTree::printDot(std::ostream &os) const {
 
   for (auto n : nodes) {
     auto &node = node_data[n];
-    auto header_id = node.header;
-    auto &header_loop_data = loop_data[node.header];
-    if (!header_loop_data.alternate_headers.empty())
-      header_id = header_loop_data.alternate_headers.front();
+    auto header_id = node.first_header ? *node.first_header : node.header;
     auto header_bb = node_data[header_id].bb;
 
     if (header_bb == &f.getFirstBB() && node.bb == header_bb)
