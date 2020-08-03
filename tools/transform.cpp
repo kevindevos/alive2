@@ -1354,11 +1354,9 @@ void Transform::preprocess(unsigned unroll_factor) {
           // in outer -> inner order
           stack<unsigned> loops;
           auto loop = n;
-          if (!unroll_data[loop].pre_duped) {
-            while (loop != lt.ROOT_ID) {
-              loops.push(loop);
-              loop = *lt.node_data[loop].first_header;
-            }
+          while (loop != lt.ROOT_ID && !unroll_data[loop].pre_duped) {
+            loops.push(loop);
+            loop = *lt.node_data[loop].first_header;
           }
 
           while (!loops.empty()) {
