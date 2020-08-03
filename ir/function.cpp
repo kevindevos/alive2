@@ -557,13 +557,13 @@ void LoopTree::buildLoopTree() {
           if (lnode != w) {
             if (!lnode_data.first_header) {
               lnode_data.first_header = w;
-              if (!loop_data[lnode].nodes.empty())
+              if (loop_data[lnode].nodes.size() > 1)
                 w_loop_data.child_loops.push_back(lnode);
             }
           }
         }
       }
-      if (valid_loop)
+      if (valid_loop && w_loop_data.nodes.size() > 1)
         loop_header_ids.push_back(w);
     }
     if (!w_num)
