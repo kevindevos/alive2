@@ -1163,6 +1163,7 @@ void Transform::preprocess(unsigned unroll_factor) {
       };
 
       auto dupe_bb = [&](unsigned bb, unsigned header) -> unsigned {
+        lt.node_data.reserve(lt.node_data.size()+1);
         auto &bb_data = lt.node_data[bb];
         bb_data.id = bb;
 
