@@ -555,10 +555,11 @@ void LoopTree::buildLoopTree() {
         if (has_in_exit && has_in_entry) {
           w_loop_data.nodes.push_back(lnode);
           if (lnode != w) {
-            if (!loop_data[lnode].nodes.empty())
-              w_loop_data.child_loops.push_back(lnode);
-            if (!lnode_data.first_header)
+            if (!lnode_data.first_header) {
               lnode_data.first_header = w;
+              if (!loop_data[lnode].nodes.empty())
+                w_loop_data.child_loops.push_back(lnode);
+            }
           }
         }
       }
