@@ -1099,9 +1099,6 @@ void Transform::preprocess(unsigned unroll_factor) {
   auto max_loops = -1;
 
   struct UnrollNodeData {
-  private:
-    unsigned dupe_counter_;
-  public:
     unsigned id;
     // the bb from which id was duped
     unsigned original;
@@ -1111,7 +1108,7 @@ void Transform::preprocess(unsigned unroll_factor) {
     // if it is not it's own original
     unsigned first_preorder;
     // the bb in original CFG from which this has been duped
-    shared_ptr<unsigned> dupe_counter = make_shared<unsigned>(dupe_counter_);
+    unsigned dupe_counter;
     std::optional<unsigned> last_dupe;
     // id of loop in which this bb was last duped in
     optional<unsigned> prev_loop_dupe;
@@ -1128,7 +1125,6 @@ void Transform::preprocess(unsigned unroll_factor) {
       if (lt.loopCount() == 0)
         continue;
 
-      unsigned last_non_duped_id = lt.node_data.size()-1;
       vector<UnrollNodeData> unroll_data;
       unsigned cur_loop; // current loop being unrolled
       optional<unsigned> prev_loop; // loop unrolled before current
@@ -1167,19 +1163,15 @@ void Transform::preprocess(unsigned unroll_factor) {
         auto &bb_data = lt.node_data[bb];
         bb_data.id = bb;
 
-        bool is_duped = bb > last_non_duped_id;
-        auto &name = bb_data.bb->getName();
-        string str = !is_duped ? name+"_#" : name.substr(0, name.size()-1);
         unroll_data.emplace_back();
         auto &u_bb_data = unroll_data[bb];
-        auto &u_orig_data = unroll_data[unroll_data[bb].original];
-        auto &dupe_counter = u_orig_data.dupe_counter;
-        auto id = lt.node_data.size();
-        str += to_string(++(*dupe_counter));
-        auto bb_ptr = bb_data.bb->dup("");
-        bb_ptr->setName(str);
+        auto &dupe_counter = unroll_data[u_bb_data.first_original].dupe_counter;
+        auto bb_first_orig = lt.node_data[u_bb_data.first_original].bb;
+        string suffix = "_#" + to_string(++dupe_counter);
+        auto bb_ptr = bb_first_orig->dup(suffix);
         auto ins_bb = fn->addBB(move(*bb_ptr));
 
+        auto id = lt.node_data.size();
         lt.node_data.emplace_back();
         if (id >= lt.loop_data.size())
           lt.loop_data.emplace_back();
@@ -1210,7 +1202,6 @@ void Transform::preprocess(unsigned unroll_factor) {
         u_bb_data.prev_loop_dupe = cur_loop;
         u_ins_data.prev_loop_dupe = cur_loop;
         unroll_data[u_ins_data.original].last_dupe = id;
-        u_ins_data.dupe_counter = unroll_data[u_ins_data.original].dupe_counter;
         u_ins_data.id = id;
         u_ins_data.first_original = u_bb_data.first_original;
 
@@ -1467,8 +1458,8 @@ void Transform::preprocess(unsigned unroll_factor) {
       if (config::debug) {
         if (fn == &tgt) continue;
         CFG cfg_(*fn);
-        ofstream f1("src_unrolled.dot");
-        cfg_.printDot(f1);
+        ofstream f3("src_unrolled.dot");
+        cfg_.printDot(f3);
       }
     }
   }
