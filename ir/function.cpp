@@ -367,9 +367,7 @@ void LoopTree::buildLoopTree() {
   // used in DFS to override sucessor list of a bb when fix_loops added new bbs
   unordered_map<const BasicBlock*, vector<const BasicBlock*>> succ_override;
 
-  // reserve more than total number of blocks to prevent necessary
-  // reallocation when adding new bbs in procedure fix_loops
-  vecsets_data.reserve(2*f.getBBs().size());
+  vecsets_data.reserve(f.getBBs().size());
 
   auto bb_id = [&](const BasicBlock *bb) {
     auto [I, inserted] = bb_map.emplace(bb, node_data.size());
