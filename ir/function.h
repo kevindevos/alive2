@@ -33,7 +33,6 @@ public:
   BasicBlock(std::string_view name) : name(name) {}
 
   const std::string& getName() const { return name; }
-  void setName(const std::string &name_) { name = name_; }
 
   smt::expr getTypeConstraints(const Function &f) const;
   void fixupTypes(const smt::Model &m);
