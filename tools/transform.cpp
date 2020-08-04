@@ -1241,12 +1241,14 @@ void Transform::preprocess(unsigned unroll_factor) {
         if (replace) {
           replaced = instr->replaceTarget(cond, *lt.node_data[dst].bb);
           if (replaced) {
-            for (auto &[succ, data] : lt.node_data[src].succs) {
+            auto &succs = lt.node_data[src].succs;
+            for (auto &[succ, data] : succs) {
               if (data.first == cond) {
                 data.second = as_back;
                 auto node_handler = lt.node_data[src].succs.extract(succ);
                 node_handler.key() = dst;
                 lt.node_data[src].succs.insert(move(node_handler));
+                break;
               }
             }
             for (auto &[c, pred] : lt.node_data[dst].preds)
