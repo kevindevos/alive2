@@ -1102,11 +1102,8 @@ void Transform::preprocess(unsigned unroll_factor) {
     unsigned id;
     // the bb from which id was duped
     unsigned original;
-    // the bb in the original CFG this corresponds to
+    // the original cfg this bb corresponds to before unroll
     unsigned first_original;
-    // equal to the first preorder assigned to the original, or it's number
-    // if it is not it's own original
-    unsigned first_preorder;
     // the bb in original CFG from which this has been duped
     unsigned dupe_counter;
     std::optional<unsigned> last_dupe;
@@ -1130,7 +1127,6 @@ void Transform::preprocess(unsigned unroll_factor) {
       optional<unsigned> prev_loop; // loop unrolled before current
       // keep nodes that are inconsistent with topological order for fixing
       // after each loop unroll
-      set<unsigned> to_fix_top_order;
       optional<unsigned> last_duped_header;
       unsigned num_duped_bbs = 0;
 
@@ -1141,7 +1137,6 @@ void Transform::preprocess(unsigned unroll_factor) {
         u_data.id = node.id;
         u_data.original = node.id;
         u_data.last_dupe = node.id;
-        u_data.first_preorder = lt.number[node.id];
         u_data.first_original = node.id;
       }
 
@@ -1191,12 +1186,10 @@ void Transform::preprocess(unsigned unroll_factor) {
 
         // if bb was last duped in a different loop, make it the new original
         u_ins_data.original = u_bb_data.original;
-        u_ins_data.first_preorder = lt.number[id];
         if (u_bb_data.prev_loop_dupe.has_value() &&
             u_bb_data.prev_loop_dupe != cur_loop) {
           u_ins_data.original = bb;
           u_bb_data.original = bb;
-          u_ins_data.first_preorder = lt.number[bb];
         }
 
         u_bb_data.prev_loop_dupe = cur_loop;
@@ -1234,19 +1227,13 @@ void Transform::preprocess(unsigned unroll_factor) {
       };
 
       auto is_back_edge = [&](unsigned src, unsigned dst) -> bool {
-        return lt.number[src] > lt.number[dst];
-      };
-
-      auto top_move_back = [&](unsigned bb) {
-        lt.nodes[lt.number[bb]] = -1;
-        lt.number[bb] = lt.nodes.size();
-        lt.nodes.push_back(bb);
-        if (bb != unroll_data[bb].original)
-          unroll_data[bb].first_preorder = lt.number[bb];
+        auto &src_succs = lt.node_data[src].succs;
+        auto I = src_succs.find(dst);
+        return I != src_succs.end() ? I->second.second : false;
       };
 
       auto add_edge = [&](Value *cond, unsigned src, unsigned dst, bool replace,
-                          bool as_back_edge) {
+                          bool as_back) {
         auto &src_data = lt.node_data[src];
         auto instr = (JumpInstr*) &src_data.bb->back();
         bool replaced = false;
@@ -1254,8 +1241,16 @@ void Transform::preprocess(unsigned unroll_factor) {
         if (replace) {
           replaced = instr->replaceTarget(cond, *lt.node_data[dst].bb);
           if (replaced) {
-            for (auto &[c, succ] : lt.node_data[src].succs)
-              if (c == cond) succ = dst;
+            auto &succs = lt.node_data[src].succs;
+            for (auto &[succ, data] : succs) {
+              if (data.first == cond) {
+                data.second = as_back;
+                auto node_handler = lt.node_data[src].succs.extract(succ);
+                node_handler.key() = dst;
+                lt.node_data[src].succs.insert(move(node_handler));
+                break;
+              }
+            }
             for (auto &[c, pred] : lt.node_data[dst].preds)
               if (c == cond) pred = src;
           }
@@ -1264,16 +1259,7 @@ void Transform::preprocess(unsigned unroll_factor) {
         if (!replace || !replaced) {
           instr->addTarget(cond, *lt.node_data[dst].bb);
           lt.node_data[dst].preds.emplace_back(cond, src);
-          lt.node_data[src].succs.emplace_back(cond, dst);
-        }
-
-        // enforce topological ordering with the havlak preorder by
-        // ensuring that dst has a larger preorder than src when adding an
-        // edge that is not intended to be a back-edge
-        if (!as_back_edge && is_back_edge(src, dst)) {
-          top_move_back(dst);
-          if (dst == unroll_data[dst].original)
-            to_fix_top_order.insert(dst);
+          lt.node_data[src].succs.emplace(dst, make_pair(cond, as_back));
         }
       };
 
@@ -1284,7 +1270,7 @@ void Transform::preprocess(unsigned unroll_factor) {
         // return empty if duped header will have no outgoing edges
         if (last_it) {
           bool edge_will_be_added = false;
-          for (auto &[c, dst] : lt.node_data[header].succs)
+          for (auto &[dst, data] : lt.node_data[header].succs)
             if (!in_loop(dst, header))
               edge_will_be_added = true;
           if (!edge_will_be_added)
@@ -1298,9 +1284,9 @@ void Transform::preprocess(unsigned unroll_factor) {
         if (last_it) {
           // add the appropriate back-edges on the last iteration for the duped
           // header which correspond to edges from header to nodes in the loop
-          for (auto &[c, dst] : lt.node_data[header].succs) {
+          for (auto &[dst, data] : lt.node_data[header].succs) {
             if (in_loop(dst, header))
-              add_edge(c, *duped_header, last_dupe(dst), false, true);
+              add_edge(data.first, *duped_header, last_dupe(dst), false, true);
           }
         }
 
@@ -1367,9 +1353,9 @@ void Transform::preprocess(unsigned unroll_factor) {
                 add_edge(c, pred, *hdr, is_back_edge(pred, loop), false);
             }
 
-            for (auto &[c, dst] : lt.node_data[loop].succs) {
+            for (auto &[dst, data] : lt.node_data[loop].succs) {
               if (!in_loop(dst, loop))
-                add_edge(c, *hdr, last_dupe(dst), false, false);
+                add_edge(data.first, *hdr, last_dupe(dst), false, false);
             }
           }
 
@@ -1384,74 +1370,55 @@ void Transform::preprocess(unsigned unroll_factor) {
             auto loop_size = loop.size();
             for (unsigned i = 1; i < loop_size; ++i) {
               auto bb = loop[i];
-              for (auto &[cond, dst] : lt.node_data[bb].succs) {
+              for (auto &[dst, data] : lt.node_data[bb].succs) {
                 bool dst_in_loop = in_loop(unroll_data[dst].original, cur_loop);
                 auto dst_ = dst_in_loop ? last_dupe(dst) : dst;
-                add_edge(cond, last_dupe(bb), dst_, is_back_edge(bb, dst),
+                add_edge(data.first, last_dupe(bb), dst_, is_back_edge(bb, dst),
                          false);
               }
             }
 
             // dupe header edges
-            for (auto &[c, dst] : lt.node_data[n].succs) {
+            for (auto &[dst, data] : lt.node_data[n].succs) {
               if (in_loop(dst, n))
-                add_edge(c, n_prev, last_dupe(dst), false, false);
+                add_edge(data.first, n_prev, last_dupe(dst), false, false);
               else
-                if (n_) add_edge(c, *n_, dst, false, false);
+                if (n_)
+                  add_edge(data.first, *n_, dst, false, false);
 
             }
             n_prev = *n_;
           }
           prev_loop = cur_loop;
         }
-
-        if (prev_loop && lt.node_data[*prev_loop].header == lt.ROOT_ID) {
-          // adjust topological order for nodes that are inconsistent after
-          // the last containing loop was unrolled
-          stack<unsigned> worklist;
-          vector<pair<bool, unsigned>> fix_visited; // bool visited, root node
-          fix_visited.resize(lt.node_data.size());
-
-          for (auto root : to_fix_top_order) {
-            // if this root wasn't visited, push into worklist
-            if (!fix_visited[root].first)
-              worklist.push(root);
-
-            while (!worklist.empty()) {
-              auto cur = worklist.top();
-              worklist.pop();
-
-              // only visit nodes not visited by current root
-              if (fix_visited[cur].first && fix_visited[cur].second == root)
-                continue;
-              fix_visited[cur].first = true;
-              fix_visited[cur].second = root;
-              top_move_back(cur);
-
-              for (auto succ : lt.node_data[cur].succs) {
-                if (!is_back_edge(unroll_data[cur].first_preorder,
-                                  unroll_data[succ.second].first_preorder))
-                  worklist.push(succ.second);
-              }
-            }
-          }
-          prev_loop.reset();
-        }
       }
 
-      // Overwrite BB_order for the function to maintain proper topological
-      // order
-      // ensuring that all edges in the unrolled CFG are forward edges
+      // topsort in sort.h but specific to the data structures here
       if (num_duped_bbs > 0) {
+        vector<unsigned> sorted;
+        vector<bool> marked;
+        marked.resize(lt.node_data.size());
+
+        function<void(unsigned)> visit = [&](unsigned v) {
+          if (marked[v])
+            return;
+          marked[v] = true;
+
+          // visit only forward edges, the remaining edges are back-edges
+          for (auto child : lt.node_data[v].succs) {
+            if (!child.second.second)
+              visit(child.first);
+          }
+          sorted.emplace_back(v);
+        };
+
+        visit(lt.ROOT_ID);
+
+        // update BB_order in function for the desired topological order
         auto &bbs = fn->getBBs();
         bbs.clear();
-        int id = 0;
-        auto nodes_size = lt.nodes.size();
-        for (unsigned i = 0; i < nodes_size; ++i) {
-          id = lt.nodes[i];
-          if (id != -1)
-            bbs.emplace_back(lt.node_data[id].bb);
-        }
+        for (auto I = sorted.rbegin(), E = sorted.rend(); I != E; ++I)
+          bbs.emplace_back(lt.node_data[*I].bb);
       }
 
       // DEBUG , print unrolled dot for src only
