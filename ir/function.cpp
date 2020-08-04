@@ -406,12 +406,13 @@ void LoopTree::buildLoopTree() {
 
     auto try_push_worklist = [&](const BasicBlock *bb, unsigned pred, auto c) {
       auto t_n = bb_id(bb);
-      if (!visited[t_n])
+      bool b_visited = visited[t_n];
+      if (!b_visited)
         dfs_work_list.push(bb);
       auto &t_data = node_data[t_n];
       t_data.id = t_n;
       t_data.preds.emplace_back(c, pred);
-      node_data[pred].succs.emplace_back(c, t_n);
+      node_data[pred].succs.emplace(t_n, std::make_pair(c, b_visited));
     };
 
     while (!dfs_work_list.empty()) {
@@ -536,9 +537,8 @@ void LoopTree::buildLoopTree() {
             has_in_entry = true; // (x, lnode) : x in loop
         }
 
-        for (auto &[c, succ] : lnode_data.succs) {
-          (void)c;
-          if (vecsetFind(succ) != w)
+        for (auto &succ : lnode_data.succs) {
+          if (vecsetFind(succ.first) != w)
             has_out_exit = true; // (lnode, x) : x not in loop
           else
             has_in_exit = true; // (lnode, x) : x in loop

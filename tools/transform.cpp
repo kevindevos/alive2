@@ -1093,6 +1093,7 @@ void Transform::preprocess(unsigned unroll_factor) {
   }
 
   auto k = unroll_factor;
+  k = 2;
 
   // DEBUG
   auto loops_so_far = 0;
@@ -1234,6 +1235,9 @@ void Transform::preprocess(unsigned unroll_factor) {
       };
 
       auto is_back_edge = [&](unsigned src, unsigned dst) -> bool {
+        // TODO change to map
+        // TODO consider also possibility of looking up a node that does not
+        // exist!?
         return lt.number[src] > lt.number[dst];
       };
 
@@ -1246,7 +1250,7 @@ void Transform::preprocess(unsigned unroll_factor) {
       };
 
       auto add_edge = [&](Value *cond, unsigned src, unsigned dst, bool replace,
-                          bool as_back_edge) {
+                          bool as_back) {
         auto &src_data = lt.node_data[src];
         auto instr = (JumpInstr*) &src_data.bb->back();
         bool replaced = false;
@@ -1254,8 +1258,13 @@ void Transform::preprocess(unsigned unroll_factor) {
         if (replace) {
           replaced = instr->replaceTarget(cond, *lt.node_data[dst].bb);
           if (replaced) {
-            for (auto &[c, succ] : lt.node_data[src].succs)
-              if (c == cond) succ = dst;
+            for (auto &[succ, data] : lt.node_data[src].succs) {
+              if (data.first == cond) {
+                lt.node_data[src].succs.emplace(dst, make_pair(data.first,
+                                                               as_back));
+                lt.node_data[src].succs.erase(succ);
+              }
+            }
             for (auto &[c, pred] : lt.node_data[dst].preds)
               if (c == cond) pred = src;
           }
@@ -1264,13 +1273,13 @@ void Transform::preprocess(unsigned unroll_factor) {
         if (!replace || !replaced) {
           instr->addTarget(cond, *lt.node_data[dst].bb);
           lt.node_data[dst].preds.emplace_back(cond, src);
-          lt.node_data[src].succs.emplace_back(cond, dst);
+          lt.node_data[src].succs.emplace(dst, make_pair(cond, as_back));
         }
 
         // enforce topological ordering with the havlak preorder by
         // ensuring that dst has a larger preorder than src when adding an
         // edge that is not intended to be a back-edge
-        if (!as_back_edge && is_back_edge(src, dst)) {
+        if (!as_back && is_back_edge(src, dst)) {
           top_move_back(dst);
           if (dst == unroll_data[dst].original)
             to_fix_top_order.insert(dst);
@@ -1284,7 +1293,7 @@ void Transform::preprocess(unsigned unroll_factor) {
         // return empty if duped header will have no outgoing edges
         if (last_it) {
           bool edge_will_be_added = false;
-          for (auto &[c, dst] : lt.node_data[header].succs)
+          for (auto &[dst, data] : lt.node_data[header].succs)
             if (!in_loop(dst, header))
               edge_will_be_added = true;
           if (!edge_will_be_added)
@@ -1298,9 +1307,9 @@ void Transform::preprocess(unsigned unroll_factor) {
         if (last_it) {
           // add the appropriate back-edges on the last iteration for the duped
           // header which correspond to edges from header to nodes in the loop
-          for (auto &[c, dst] : lt.node_data[header].succs) {
+          for (auto &[dst, data] : lt.node_data[header].succs) {
             if (in_loop(dst, header))
-              add_edge(c, *duped_header, last_dupe(dst), false, true);
+              add_edge(data.first, *duped_header, last_dupe(dst), false, true);
           }
         }
 
@@ -1367,9 +1376,9 @@ void Transform::preprocess(unsigned unroll_factor) {
                 add_edge(c, pred, *hdr, is_back_edge(pred, loop), false);
             }
 
-            for (auto &[c, dst] : lt.node_data[loop].succs) {
+            for (auto &[dst, data] : lt.node_data[loop].succs) {
               if (!in_loop(dst, loop))
-                add_edge(c, *hdr, last_dupe(dst), false, false);
+                add_edge(data.first, *hdr, last_dupe(dst), false, false);
             }
           }
 
@@ -1384,20 +1393,21 @@ void Transform::preprocess(unsigned unroll_factor) {
             auto loop_size = loop.size();
             for (unsigned i = 1; i < loop_size; ++i) {
               auto bb = loop[i];
-              for (auto &[cond, dst] : lt.node_data[bb].succs) {
+              for (auto &[dst, data] : lt.node_data[bb].succs) {
                 bool dst_in_loop = in_loop(unroll_data[dst].original, cur_loop);
                 auto dst_ = dst_in_loop ? last_dupe(dst) : dst;
-                add_edge(cond, last_dupe(bb), dst_, is_back_edge(bb, dst),
+                add_edge(data.first, last_dupe(bb), dst_, is_back_edge(bb, dst),
                          false);
               }
             }
 
             // dupe header edges
-            for (auto &[c, dst] : lt.node_data[n].succs) {
+            for (auto &[dst, data] : lt.node_data[n].succs) {
               if (in_loop(dst, n))
-                add_edge(c, n_prev, last_dupe(dst), false, false);
+                add_edge(data.first, n_prev, last_dupe(dst), false, false);
               else
-                if (n_) add_edge(c, *n_, dst, false, false);
+                if (n_)
+                  add_edge(data.first, *n_, dst, false, false);
 
             }
             n_prev = *n_;
@@ -1430,8 +1440,8 @@ void Transform::preprocess(unsigned unroll_factor) {
 
               for (auto succ : lt.node_data[cur].succs) {
                 if (!is_back_edge(unroll_data[cur].first_preorder,
-                                  unroll_data[succ.second].first_preorder))
-                  worklist.push(succ.second);
+                                  unroll_data[succ.first].first_preorder))
+                  worklist.push(succ.first);
               }
             }
           }
