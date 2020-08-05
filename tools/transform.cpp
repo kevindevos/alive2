@@ -1232,6 +1232,19 @@ void Transform::preprocess(unsigned unroll_factor) {
         return I != src_succs.end() ? I->second.second : false;
       };
 
+      auto last_cond = [&](Value *cond) -> Value* {
+        Value *new_cond = cond;
+        if (auto instr = dynamic_cast<Instr*>(cond)) {
+          auto containing_bb = instr->getBB();
+          auto c_bb_id = lt.bb_map[containing_bb];
+          auto instr_idx = containing_bb->getInstrIdx(cond->getName());
+          auto last_dp_bb = lt.node_data[last_dupe(c_bb_id)].bb;
+          new_cond = (Value*) &last_dp_bb->getInstr(instr_idx);
+          cout << ".";
+        }
+        return new_cond;
+      };
+
       auto add_edge = [&](Value *cond, unsigned src, unsigned dst, bool replace,
                           bool as_back) {
         auto &src_data = lt.node_data[src];
@@ -1257,7 +1270,7 @@ void Transform::preprocess(unsigned unroll_factor) {
         }
 
         if (!replace || !replaced) {
-          instr->addTarget(cond, *lt.node_data[dst].bb);
+          instr->addTarget(last_cond(cond), *lt.node_data[dst].bb);
           lt.node_data[dst].preds.emplace_back(cond, src);
           lt.node_data[src].succs.emplace(dst, make_pair(cond, as_back));
         }
@@ -1278,8 +1291,6 @@ void Transform::preprocess(unsigned unroll_factor) {
         }
 
         duped_header = dupe_bb(header, n);
-        auto &duped_header_data = lt.node_data[*duped_header];
-        ((JumpInstr*) &duped_header_data.bb->back())->clearTargets();
 
         if (last_it) {
           // add the appropriate back-edges on the last iteration for the duped
