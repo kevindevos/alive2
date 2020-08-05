@@ -27,6 +27,8 @@ class Function;
 class BasicBlock final {
   std::string name;
   std::vector<std::unique_ptr<Instr>> m_instrs;
+  std::unordered_map<std::string, std::pair<std::unique_ptr<Instr>*, unsigned>>
+    instr_names;
 
 public:
   BasicBlock(std::string &&name) : name(std::move(name)) {}
@@ -39,6 +41,13 @@ public:
 
   void addInstr(std::unique_ptr<Instr> &&i);
   void delInstr(Instr *i);
+  Instr& getInstr(const std::string &name) {
+    return **instr_names.at(name).first;
+  }
+  Instr& getInstr(unsigned idx) { return *m_instrs[idx]; }
+  auto getInstrIdx(const std::string &name) {
+    return instr_names.at(name).second;
+  }
 
   util::const_strip_unique_ptr<decltype(m_instrs)> instrs() const {
     return m_instrs;

@@ -29,12 +29,15 @@ void BasicBlock::fixupTypes(const Model &m) {
 
 void BasicBlock::addInstr(unique_ptr<Instr> &&i) {
   m_instrs.push_back(move(i));
+  auto t = make_pair(&m_instrs.back(), m_instrs.size());
+  instr_names.emplace(m_instrs.back()->getName(), t);
 }
 
 void BasicBlock::delInstr(Instr *i) {
   for (auto I = m_instrs.begin(), E = m_instrs.end(); I != E; ++I) {
     if (I->get() == i) {
       m_instrs.erase(I);
+      instr_names.erase(i->getName());
       return;
     }
   }
