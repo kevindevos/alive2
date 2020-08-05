@@ -1188,9 +1188,6 @@ void Transform::preprocess(unsigned unroll_factor) {
           lt.loop_data.emplace_back();
         lt.loop_data[id].id = id;
 
-        // build successors data for duped bb
-        build_successor_data(bb, id);
-
         auto &ins_n_data = lt.node_data[id];
         ins_n_data.bb = ins_bb;
         ins_n_data.id = id;
@@ -1226,6 +1223,9 @@ void Transform::preprocess(unsigned unroll_factor) {
           }
         }
 
+        // build successors data for duped bb
+        build_successor_data(bb, id);
+
         ++num_duped_bbs;
         return id;
       };
@@ -1260,9 +1260,8 @@ void Transform::preprocess(unsigned unroll_factor) {
         auto instr = (JumpInstr*) &src_data.bb->back();
         instr->replaceTarget(cond, *lt.node_data[dst].bb);
         src_data.succs[old_dst] = make_tuple(cond, dst, as_back_edge);
-
         lt.node_data[old_dst].preds.erase(src);
-        lt.node_data[dst].preds[src] = cond;
+        lt.node_data[dst].preds.emplace(src, cond);
         // TODO if pred of old_dst was different than src, would it give issues?
         // check
       };
@@ -1414,8 +1413,8 @@ void Transform::preprocess(unsigned unroll_factor) {
 
           // visit only forward edges, the remaining edges are back-edges
           for (auto child : lt.node_data[v].succs) {
-            if (!get<1>(child.second))
-              visit(child.first);
+            if (!get<2>(child.second))
+              visit(get<1>(child.second));
           }
           sorted.emplace_back(v);
         };
