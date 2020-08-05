@@ -1260,6 +1260,9 @@ void Transform::preprocess(unsigned unroll_factor) {
         auto instr = (JumpInstr*) &src_data.bb->back();
         instr->replaceTarget(cond, *lt.node_data[dst].bb);
         src_data.succs[old_dst] = make_tuple(cond, dst, as_back_edge);
+        auto nh = src_data.succs.extract(old_dst);
+        nh.key() = dst;
+        src_data.succs.insert(move(nh));
         lt.node_data[old_dst].preds.erase(src);
         lt.node_data[dst].preds.emplace(src, cond);
         // TODO if pred of old_dst was different than src, would it give issues?
