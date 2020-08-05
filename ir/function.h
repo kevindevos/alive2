@@ -201,8 +201,9 @@ public:
   public:
     unsigned id;
     BasicBlock *bb;
-    std::vector<std::pair<Value*, unsigned>> preds;
-    std::unordered_map<unsigned, std::pair<Value*, bool>> succs;
+    std::unordered_map<unsigned, Value*> preds;
+    // old_dst -> <jump condition, new_dst, edge_type>
+    std::unordered_map<unsigned, std::tuple<Value*, unsigned, bool>> succs;
     std::vector<unsigned> non_back_preds;
     std::vector<unsigned> back_preds;
     std::vector<unsigned> red_back_in;
@@ -245,13 +246,13 @@ private:
   // id's of bb's that are loop headers
   std::vector<unsigned> loop_header_ids;
 
-  // bb -> bb id
-  std::unordered_map<const BasicBlock*, unsigned> bb_map;
-
   unsigned vecsetFind(unsigned bb);
   void vecsetUnion(unsigned from, unsigned to);
   void buildLoopTree();
 public:
+  // bb -> bb id
+  std::unordered_map<const BasicBlock*, unsigned> bb_map;
+
   std::vector<NodeData> node_data;
   // bb id of loop header -> loop data
   std::vector<LoopData> loop_data;

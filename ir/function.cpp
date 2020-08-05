@@ -409,8 +409,8 @@ void LoopTree::buildLoopTree() {
         dfs_work_list.push(bb);
       auto &t_data = node_data[t_n];
       t_data.id = t_n;
-      t_data.preds.emplace_back(c, pred);
-      node_data[pred].succs.emplace(t_n, std::make_pair(c, b_visited));
+      t_data.preds.emplace(pred, c);
+      node_data[pred].succs.emplace(t_n, make_tuple(c, t_n, b_visited));
     };
 
     while (!dfs_work_list.empty()) {
@@ -462,7 +462,7 @@ void LoopTree::buildLoopTree() {
     auto &w_data = node_data[w];
     w_data.header = 0;
     w_data.type = LHeaderType::nonheader;
-    for (auto &[c, v] : w_data.preds) {
+    for (auto &[v, c] : w_data.preds) {
       (void)c;
       if (isAncestor(w_num, number[v]))
         w_data.back_preds.push_back(v);
@@ -527,7 +527,7 @@ void LoopTree::buildLoopTree() {
         has_out_exit = has_out_entry = has_in_entry = has_in_exit = false;
         auto &lnode_data = node_data[lnode];
 
-        for (auto &[c, pred] : lnode_data.preds) {
+        for (auto &[pred, c] : lnode_data.preds) {
           (void)c;
           if (vecsetFind(pred) != w)
             has_out_entry = true; // (x, lnode) : x not in loop
@@ -536,7 +536,7 @@ void LoopTree::buildLoopTree() {
         }
 
         for (auto &succ : lnode_data.succs) {
-          if (vecsetFind(succ.first) != w)
+          if (vecsetFind(get<1>(succ.second)) != w)
             has_out_exit = true; // (lnode, x) : x not in loop
           else
             has_in_exit = true; // (lnode, x) : x in loop
