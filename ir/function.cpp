@@ -30,7 +30,7 @@ void BasicBlock::fixupTypes(const Model &m) {
 void BasicBlock::addInstr(unique_ptr<Instr> &&i) {
   i->setBB(this);
   m_instrs.push_back(move(i));
-  auto t = make_pair(&m_instrs.back(), m_instrs.size());
+  auto t = make_pair(&m_instrs.back(), m_instrs.size()-1);
   instr_names.emplace(m_instrs.back()->getName(), t);
 }
 
