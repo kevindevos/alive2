@@ -14,6 +14,8 @@ class Function;
 
 
 class Instr : public Value {
+private:
+  BasicBlock *bb;
 protected:
   Instr(Type &type, std::string &&name) : Value(type, std::move(name)) {}
 
@@ -22,6 +24,8 @@ public:
   virtual void rauw(const Value &what, Value &with) = 0;
   virtual smt::expr eqType(const Instr &i) const;
   smt::expr getTypeConstraints() const override;
+  BasicBlock* getBB() { return bb; }
+  void setBB(BasicBlock *bb_) { bb = bb_; }
   virtual smt::expr getTypeConstraints(const Function &f) const = 0;
   virtual std::unique_ptr<Instr> dup(const std::string &suffix) const = 0;
 };
