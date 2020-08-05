@@ -1159,14 +1159,14 @@ void Transform::preprocess(unsigned unroll_factor) {
         auto &to_bb_succs = to_bb_data.succs;
         auto to_bb = to_bb_data.bb;
         if (auto instr = dynamic_cast<const JumpInstr*>(&to_bb->back())) {
-            auto tgt_it = const_cast<JumpInstr*>(instr)->targets();
-            for (auto I = tgt_it.begin(), E = tgt_it.end(); I != E; ++I) {
-              auto [cond, bb] = I.get();
-              auto bb_id = lt.bb_map[&bb];
-              auto edge_type = get<2>(lt.node_data[from].succs[bb_id]);
-              to_bb_succs.emplace(bb_id, make_tuple(cond, bb_id, edge_type));
-            }
+          auto tgt_it = const_cast<JumpInstr*>(instr)->targets();
+          for (auto I = tgt_it.begin(), E = tgt_it.end(); I != E; ++I) {
+            auto [cond, bb] = I.get();
+            auto bb_id = lt.bb_map[&bb];
+            auto edge_type = get<2>(lt.node_data[from].succs[bb_id]);
+            to_bb_succs.emplace(bb_id, make_tuple(cond, bb_id, edge_type));
           }
+        }
       };
 
       auto dupe_bb = [&](unsigned bb, unsigned header) -> unsigned {
