@@ -1107,6 +1107,7 @@ void Transform::preprocess(unsigned unroll_factor) {
     // the bb in original CFG from which this has been duped
     unsigned dupe_counter;
     std::optional<unsigned> last_dupe;
+    std::optional<unsigned> last_dupe_w_instrs;
     // id of loop in which this bb was last duped in
     optional<unsigned> prev_loop_dupe;
     bool pre_duped = false;
@@ -1129,28 +1130,81 @@ void Transform::preprocess(unsigned unroll_factor) {
       // after each loop unroll
       optional<unsigned> last_duped_header;
       unsigned num_duped_bbs = 0;
-
-      // Prepare data structure for unroll algorithm
-      for (auto node : lt.node_data) {
-        unroll_data.emplace_back();
-        auto &u_data = unroll_data.back();
-        u_data.id = node.id;
-        u_data.original = node.id;
-        u_data.last_dupe = node.id;
-        u_data.first_original = node.id;
-      }
-
-      // debug print cfg and loop tree
-      if (config::debug) {
-        if (fn == &tgt) continue;
-        ofstream f1("src.dot");
-        cfg.printDot(f1);
-        ofstream f2("loop.dot");
-        lt.printDot(f2);
-      }
+      // order of bbs to update instr operands
+      vector<unsigned> bbs_instr_order;
+      vector<unsigned> bbs_instr_order_delayed;
 
       auto last_dupe = [&](unsigned bb) -> unsigned {
         return *unroll_data[unroll_data[bb].original].last_dupe;
+      };
+
+      auto last_val = [&](Value *val) -> Value* {
+        Value *new_val = val;
+        if (auto instr = dynamic_cast<Instr*>(val)) {
+          auto c_bb_id = lt.bb_map[instr->getBB()];
+          auto instr_idx = instr->getBB()->getInstrIdx(val->getName());
+          auto ldi_id = *unroll_data[c_bb_id].last_dupe_w_instrs;
+          new_val = (Value*) &lt.node_data[ldi_id].bb->getInstr(instr_idx);
+        }
+        return new_val;
+      };
+
+      auto in_loop = [&](unsigned bb, unsigned loop_header) -> bool {
+        if (bb == loop_header) return true;
+        auto bb_header = *lt.node_data[bb].first_header;
+
+        while (bb_header) {
+          if (bb_header != loop_header)
+            bb_header = *lt.node_data[bb_header].first_header;
+          else
+            return true;
+        }
+
+        return false;
+      };
+
+      auto dupe_instrs = [&](unsigned from, unsigned to) {
+        unroll_data[from].last_dupe_w_instrs = to;
+        auto to_bb = lt.node_data[to].bb;
+        auto from_bb = lt.node_data[from].bb;
+        auto fo_bb = lt.node_data[unroll_data[to].first_original].bb;
+        auto suffix = to_bb->getName().substr(fo_bb->getName().size());
+
+        unique_ptr<Instr> back_instr;
+        bool has_back_instr = !to_bb->instrs().container.empty();
+        if (has_back_instr)
+          back_instr = to_bb->back().dup("");
+
+        for (auto &i : from_bb->instrs()) {
+          auto i_ = i.dup(suffix);
+          for (auto op : i_->operands())
+            op = last_val(op);
+          to_bb->addInstr(move(i_));
+        }
+        if (has_back_instr)
+          to_bb->addInstr(move(back_instr));
+      };
+
+      // topologically sort a loop set
+      auto loop_top_sort = [&](unsigned loop_hdr) {
+        vector<unsigned> sorted;
+        unordered_map<unsigned, bool> vis;
+
+        function<void(unsigned)> lvisit = [&](unsigned v) {
+          auto &v_vis = vis[v];
+          if (v_vis)
+            return;
+          v_vis = true;
+          // only visit children in loop
+          for (auto &[succ, data] : lt.node_data[v].succs) {
+            (void)data;
+            if (in_loop(succ, loop_hdr))
+              lvisit(succ);
+          }
+          sorted.emplace_back(v);
+        };
+        lvisit(loop_hdr);
+        reverse(sorted.begin(), sorted.end());
       };
 
       auto dupe_bb = [&](unsigned bb, unsigned header) -> unsigned {
@@ -1163,23 +1217,24 @@ void Transform::preprocess(unsigned unroll_factor) {
         auto &dupe_counter = unroll_data[u_bb_data.first_original].dupe_counter;
         auto bb_first_orig = lt.node_data[u_bb_data.first_original].bb;
         string suffix = "_#" + to_string(++dupe_counter);
-        auto bb_ptr = bb_first_orig->dup(suffix);
+        auto bb_ptr = bb_first_orig->dup("");
         auto ins_bb = fn->addBB(move(*bb_ptr));
-
+        // instr duping is handled after and manually
+        ins_bb->setName(bb_first_orig->getName() + suffix);
         auto id = lt.node_data.size();
+        auto &u_ins_data = unroll_data[id];
+        u_ins_data.last_dupe_w_instrs = bb;
+
         lt.node_data.emplace_back();
         if (id >= lt.loop_data.size())
           lt.loop_data.emplace_back();
         lt.loop_data[id].id = id;
 
-        ((JumpInstr*) &ins_bb->back())->clearTargets();
         auto &ins_n_data = lt.node_data[id];
         ins_n_data.bb = ins_bb;
         ins_n_data.id = id;
         ins_n_data.header = bb_data.header;
         ins_n_data.first_header = *bb_data.first_header;
-
-        auto &u_ins_data = unroll_data[id];
 
         lt.number.push_back(lt.nodes.size());
         lt.nodes.push_back(id);
@@ -1208,41 +1263,19 @@ void Transform::preprocess(unsigned unroll_factor) {
           }
         }
 
+        // dupe last instr if jump
+        if (auto jmp = dynamic_cast<JumpInstr*>(&bb_data.bb->back()))
+          ins_bb->addInstr(jmp->dup(""));
+        ((JumpInstr*) &ins_bb->back())->clearTargets();
+
         ++num_duped_bbs;
         return id;
-      };
-
-      auto in_loop = [&](unsigned bb, unsigned loop_header) -> bool {
-        if (bb == loop_header) return true;
-        auto bb_header = *lt.node_data[bb].first_header;
-
-        while (bb_header) {
-          if (bb_header != loop_header)
-            bb_header = *lt.node_data[bb_header].first_header;
-          else
-            return true;
-        }
-
-        return false;
       };
 
       auto is_back_edge = [&](unsigned src, unsigned dst) -> bool {
         auto &src_succs = lt.node_data[src].succs;
         auto I = src_succs.find(dst);
         return I != src_succs.end() ? I->second.second : false;
-      };
-
-      auto last_cond = [&](Value *cond) -> Value* {
-        Value *new_cond = cond;
-        if (auto instr = dynamic_cast<Instr*>(cond)) {
-          auto containing_bb = instr->getBB();
-          auto c_bb_id = lt.bb_map[containing_bb];
-          auto instr_idx = containing_bb->getInstrIdx(cond->getName());
-          auto last_dp_bb = lt.node_data[last_dupe(c_bb_id)].bb;
-          new_cond = (Value*) &last_dp_bb->getInstr(instr_idx);
-          cout << ".";
-        }
-        return new_cond;
       };
 
       auto add_edge = [&](Value *cond, unsigned src, unsigned dst, bool replace,
@@ -1270,7 +1303,7 @@ void Transform::preprocess(unsigned unroll_factor) {
         }
 
         if (!replace || !replaced) {
-          instr->addTarget(last_cond(cond), *lt.node_data[dst].bb);
+          instr->addTarget(cond, *lt.node_data[dst].bb);
           lt.node_data[dst].preds.emplace_back(cond, src);
           lt.node_data[src].succs.emplace(dst, make_pair(cond, as_back));
         }
@@ -1291,6 +1324,8 @@ void Transform::preprocess(unsigned unroll_factor) {
         }
 
         duped_header = dupe_bb(header, n);
+        if (duped_header)
+          bbs_instr_order.push_back(*duped_header);
 
         if (last_it) {
           // add the appropriate back-edges on the last iteration for the duped
@@ -1310,8 +1345,31 @@ void Transform::preprocess(unsigned unroll_factor) {
         auto &loop = lt.loop_data[cur_loop];
         loop_size = loop.nodes.size();
         for (unsigned i = 1; i < loop_size; ++i)
-          dupe_bb(loop.nodes[i], cur_loop);
+          bbs_instr_order.push_back(dupe_bb(loop.nodes[i], cur_loop));
       };
+
+      // Prepare data structure for unroll algorithm
+      for (auto node : lt.node_data) {
+        unroll_data.emplace_back();
+        auto &u_data = unroll_data.back();
+        u_data.id = node.id;
+        u_data.original = node.id;
+        u_data.last_dupe = node.id;
+        u_data.first_original = node.id;
+      }
+
+      // debug print cfg and loop tree
+      if (config::debug) {
+        if (fn == &tgt) continue;
+        ofstream f1("src.dot");
+        cfg.printDot(f1);
+        ofstream f2("loop.dot");
+        lt.printDot(f2);
+      }
+
+      // topologically sort each loop set first for correct instr duping
+      for (auto loop : lt.loop_header_ids)
+        loop_top_sort(loop);
 
       vector<bool> visited;
       stack<unsigned> S;
@@ -1333,6 +1391,9 @@ void Transform::preprocess(unsigned unroll_factor) {
           if ((int) loops_so_far == max_loops) continue;
           ++loops_so_far;
 
+          bbs_instr_order.clear();
+          bbs_instr_order_delayed.clear();
+
           // ignore loops not marked reducible // and irreducible
           auto n_type = lt.node_data[n].type;
           if (n_type != LoopTree::LHeaderType::reducible &&
@@ -1342,6 +1403,7 @@ void Transform::preprocess(unsigned unroll_factor) {
           // pre-dupe all headers of loops that contain this one if not done yet
           // in outer -> inner order
           stack<unsigned> loops;
+
           auto loop = n;
           while (loop != lt.ROOT_ID && !unroll_data[loop].pre_duped) {
             loops.push(loop);
@@ -1356,6 +1418,11 @@ void Transform::preprocess(unsigned unroll_factor) {
             auto hdr = duplicate_header(loop, loop, k == 1);
             if (!hdr) break;
 
+            if (loop == n)
+              bbs_instr_order.push_back(loop);
+            else
+              bbs_instr_order_delayed.push_back(loop);
+
             // keep last dupe of outermost header for adding back-edges later
             if (!n_) n_ = hdr;
 
@@ -1369,6 +1436,8 @@ void Transform::preprocess(unsigned unroll_factor) {
                 add_edge(data.first, *hdr, last_dupe(dst), false, false);
             }
           }
+          reverse(bbs_instr_order_delayed.begin(),
+                  bbs_instr_order_delayed.end());
 
           auto n_prev = last_dupe(n);
           for (unsigned i = 1; i < k; ++i) {
@@ -1402,6 +1471,13 @@ void Transform::preprocess(unsigned unroll_factor) {
           }
           prev_loop = cur_loop;
         }
+
+        // Fill duped bb's with updated instrs with the correct vars
+        for (auto bb : bbs_instr_order_delayed)
+          bbs_instr_order.push_back(bb);
+        for (auto bb : bbs_instr_order)
+          dupe_instrs(bb, unroll_data[bb].original);
+
       }
 
       // topsort in sort.h but specific to the data structures here

@@ -35,6 +35,7 @@ public:
   BasicBlock(std::string_view name) : name(name) {}
 
   const std::string& getName() const { return name; }
+  void setName(std::string &&name_) { name = move(name_); }
 
   smt::expr getTypeConstraints(const Function &f) const;
   void fixupTypes(const smt::Model &m);
@@ -251,15 +252,15 @@ private:
   std::vector<Vecset*> vecsets;
   std::vector<Vecset> vecsets_data;
 
-  // id's of bb's that are loop headers
-  std::vector<unsigned> loop_header_ids;
-
   unsigned vecsetFind(unsigned bb);
   void vecsetUnion(unsigned from, unsigned to);
   void buildLoopTree();
 public:
   // bb -> bb id
   std::unordered_map<const BasicBlock*, unsigned> bb_map;
+
+  // id's of bb's that are loop headers
+  std::vector<unsigned> loop_header_ids;
 
   std::vector<NodeData> node_data;
   // bb id of loop header -> loop data
