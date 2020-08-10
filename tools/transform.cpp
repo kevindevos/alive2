@@ -1393,26 +1393,32 @@ void Transform::preprocess(unsigned unroll_factor) {
         }
       }
 
-      // topsort in sort.h but specific to the data structures here
+      // topsort in sort.h but specific to the data structures here + iterative
       if (num_duped_bbs > 0) {
         vector<unsigned> sorted;
-        vector<bool> marked;
+        vector<unsigned> worklist;
+        vector<pair<bool, bool>> marked; // <visited, pushed>
         marked.resize(lt.node_data.size());
+        worklist.push_back(lt.ROOT_ID);
 
-        function<void(unsigned)> visit = [&](unsigned v) {
-          if (marked[v])
-            return;
-          marked[v] = true;
+        while (!worklist.empty()) {
+          auto cur = worklist.back();
+          auto &[seen, pushed] = marked[cur];
+          worklist.pop_back();
 
-          // visit only forward edges, the remaining edges are back-edges
-          for (auto child : lt.node_data[v].succs) {
-            if (!child.second.second)
-              visit(child.first);
+          if (!seen) {
+            seen = true;
+            worklist.push_back(cur);
+            for (auto child : lt.node_data[cur].succs)
+              if (!child.second.second && !marked[child.first].first)
+                worklist.push_back(child.first);
+          } else {
+            if (!pushed) {
+              sorted.emplace_back(cur);
+              pushed = true;
+            }
           }
-          sorted.emplace_back(v);
-        };
-
-        visit(lt.ROOT_ID);
+        }
 
         // update BB_order in function for the desired topological order
         auto &bbs = fn->getBBs();
