@@ -1322,7 +1322,7 @@ void Transform::preprocess(unsigned unroll_factor) {
           if ((int) loops_so_far == max_loops) continue;
           ++loops_so_far;
 
-          // ignore loops not marked reducible // and irreducible
+          // ignore loops not marked reducible or irreducible
           auto n_type = lt.node_data[n].type;
           if (n_type != LoopTree::LHeaderType::reducible &&
               n_type != LoopTree::LHeaderType::irreducible)
