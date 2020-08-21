@@ -1129,6 +1129,7 @@ void Transform::preprocess(unsigned unroll_factor) {
       // after each loop unroll
       optional<unsigned> last_duped_header;
       unsigned num_duped_bbs = 0;
+      optional<BasicBlock*> sink;
 
       // Prepare data structure for unroll algorithm
       for (auto node : lt.node_data) {
@@ -1257,7 +1258,10 @@ void Transform::preprocess(unsigned unroll_factor) {
         }
 
         if (!replace || !replaced) {
-          instr->addTarget(cond, *lt.node_data[dst].bb);
+          if (as_back && !sink)
+            sink = &fn->getBB("#sink");
+          auto dst_ = as_back ? *sink : lt.node_data[dst].bb;
+          instr->addTarget(cond, *dst_);
           lt.node_data[dst].preds.emplace_back(cond, src);
           lt.node_data[src].succs.emplace(dst, make_pair(cond, as_back));
         }
@@ -1283,7 +1287,7 @@ void Transform::preprocess(unsigned unroll_factor) {
 
         if (last_it) {
           // add the appropriate back-edges on the last iteration for the duped
-          // header which correspond to edges from header to nodes in the loop
+          // header as edges to #sink
           for (auto &[dst, data] : lt.node_data[header].succs) {
             if (in_loop(dst, header))
               add_edge(data.first, *duped_header, last_dupe(dst), false, true);
@@ -1373,8 +1377,8 @@ void Transform::preprocess(unsigned unroll_factor) {
               for (auto &[dst, data] : lt.node_data[bb].succs) {
                 bool dst_in_loop = in_loop(unroll_data[dst].original, cur_loop);
                 auto dst_ = dst_in_loop ? last_dupe(dst) : dst;
-                add_edge(data.first, last_dupe(bb), dst_, is_back_edge(bb, dst),
-                         false);
+                bool back_edge = is_back_edge(bb, dst);
+                add_edge(data.first, last_dupe(bb), dst_, back_edge, back_edge);
               }
             }
 
@@ -1425,6 +1429,8 @@ void Transform::preprocess(unsigned unroll_factor) {
         bbs.clear();
         for (auto I = sorted.rbegin(), E = sorted.rend(); I != E; ++I)
           bbs.emplace_back(lt.node_data[*I].bb);
+        if (sink)
+          bbs.emplace_back(*sink);
       }
 
       // DEBUG , print unrolled dot for src only

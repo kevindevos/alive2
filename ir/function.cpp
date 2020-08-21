@@ -297,6 +297,11 @@ void CFG::edge_iterator::next() {
     if (bbi == bbe)
       return;
 
+    if ((*bbi)->empty()) {
+      ++bbi;
+      continue;
+    }
+
     if (auto instr = dynamic_cast<JumpInstr*>(&(*bbi)->back())) {
       ti = instr->targets().begin();
       te = instr->targets().end();
