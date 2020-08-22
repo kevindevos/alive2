@@ -1286,8 +1286,7 @@ void Transform::preprocess(unsigned unroll_factor) {
         ((JumpInstr*) &duped_header_data.bb->back())->clearTargets();
 
         if (last_it) {
-          // add the appropriate back-edges on the last iteration for the duped
-          // header as edges to #sink
+          // back-edges as edges to #sink
           for (auto &[dst, data] : lt.node_data[header].succs) {
             if (in_loop(dst, header))
               add_edge(data.first, *duped_header, last_dupe(dst), false, true);
@@ -1310,7 +1309,6 @@ void Transform::preprocess(unsigned unroll_factor) {
       stack<unsigned> S;
       S.push(0);
       visited.resize(lt.loop_data.size());
-      optional<unsigned> n_;
 
       while (!S.empty()) {
         auto n = S.top();
@@ -1347,10 +1345,8 @@ void Transform::preprocess(unsigned unroll_factor) {
             unroll_data[loop].pre_duped = true;
 
             auto hdr = duplicate_header(loop, loop, k == 1);
-            if (!hdr) break;
-
-            // keep last dupe of outermost header for adding back-edges later
-            if (!n_) n_ = hdr;
+            if (!hdr)
+              break;
 
             for (auto &[c, pred] : lt.node_data[loop].preds) {
               if (in_loop(pred, loop))
@@ -1367,7 +1363,7 @@ void Transform::preprocess(unsigned unroll_factor) {
           for (unsigned i = 1; i < k; ++i) {
             // create BB copies of the loop body and header
             duplicate_body();
-            n_ = duplicate_header(n, n, i == k - 1);
+            auto n_ = duplicate_header(n, n, i == k - 1);
 
             // dupe body edges
             auto &loop = lt.loop_data[n].nodes;
