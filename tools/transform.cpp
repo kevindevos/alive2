@@ -1476,9 +1476,6 @@ void Transform::preprocess(unsigned unroll_factor) {
         };
 
         ////// possible issues for Phi and operand updating code
-        // - new dupe of var in bb but use right after in same bb may not be
-        //   updated due to required instr-wise instead of bb-wise precision
-        // - assumes programs will have expected phi structure
 
         // update phi entries and add phi instructions when necessary
         visited.clear();
@@ -1583,8 +1580,23 @@ next_use:
               // if dupe of declaration is ancestor of use then replace
               auto containing_bb = *instr->containingBB();
               auto c_bb_id = lt.bb_map[containing_bb];
-              if (isAncestor(lt.nodes[i], c_bb_id))
-                instr->rauw(I->first, i_dupe.second);
+              if (isAncestor(lt.nodes[i], c_bb_id)) {
+                // if same bb, verify use comes after declaration
+                auto what = I->first;
+                bool use_before_decl = false;
+                if (lt.nodes[i] == c_bb_id) {
+                  for (auto instr : containing_bb->instrs()) {
+                    if (&instr == i_dupe.second)
+                      break;
+                    if (&instr == what) {
+                      use_before_decl = true;
+                      break;
+                    }
+                  }
+                }
+                if (!use_before_decl)
+                  instr->rauw(what, i_dupe.second);
+              }
             }
           }
         }
