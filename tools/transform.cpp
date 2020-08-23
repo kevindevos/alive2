@@ -1476,8 +1476,6 @@ void Transform::preprocess(unsigned unroll_factor) {
         };
 
         ////// possible issues for Phi and operand updating code
-        // - phi creation having name that conflicts with another
-        //   check existing var already and adjust name?
         // - new dupe of var in bb but use right after in same bb may not be
         //   updated due to required instr-wise instead of bb-wise precision
         // - assumes programs will have expected phi structure
@@ -1518,10 +1516,9 @@ void Transform::preprocess(unsigned unroll_factor) {
                   for (auto [use_dupe_bb_id, val] : use_dupes) {
                     if (isAncestor(use_dupe_bb_id, pred_) &&
                         !isAncestor(use_dupe_bb_id, first_pred)) {
-                      auto &suffix = unroll_data[target].suffix;
-                      // TODO phi variable name conflict?
+                      auto &sfx = unroll_data[target].suffix;
                       auto phi = make_unique<Phi>(use->getType(),
-                                                  use->getName() + suffix);
+                                                  use->getName() + sfx + 'phi');
                       use_dupes.emplace(use_dupes.begin() + i, target, phi);
                       phi_use[&(*phi)] = use;
                       target_data.bb->addInstrFront(move(phi));
