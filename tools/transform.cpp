@@ -1202,9 +1202,6 @@ void Transform::preprocess(unsigned unroll_factor) {
 
         auto &u_ins_data = unroll_data[id];
 
-        lt.number.push_back(lt.nodes.size());
-        lt.nodes.push_back(id);
-
         // if bb was last duped in a different loop, make it the new original
         u_ins_data.original = u_bb_data.original;
         if (u_bb_data.prev_loop_dupe.has_value() &&
