@@ -1111,6 +1111,7 @@ void Transform::preprocess(unsigned unroll_factor) {
     // id of loop in which this bb was last duped in
     optional<unsigned> prev_loop_dupe;
     bool pre_duped = false;
+    vector<pair<Instr*, Instr*>> dupes;
     // suffix for bb name
     string suffix;
   };
@@ -1185,6 +1186,7 @@ void Transform::preprocess(unsigned unroll_factor) {
           newbb->addInstr(i.dup(suffix));
           instr_dupes[i].emplace_back(id, &newbb->back());
           instr_duped_from[id] = i;
+          unroll_data[id].dupes.emplace_back(i, &newbb->back());
         }
         unroll_data[id].suffix = move(suffix);
 
@@ -1418,11 +1420,13 @@ void Transform::preprocess(unsigned unroll_factor) {
       // topsort in sort.h but specific to the data structures here + iterative
       // also build new preorder + last numbering
       lt.last.clear();
-      lt.last.resize(lt.node_data.size());
       lt.number.clear();
+      lt.nodes.clear();
+      lt.last.resize(lt.node_data.size());
       lt.number.resize(lt.node_data.size());
-      unsigned current = 0;
+      lt.nodes.resize(lt.node_data.size());
 
+      unsigned current = 0;
       if (num_duped_bbs > 0) {
         vector<unsigned> sorted;
         vector<unsigned> worklist;
@@ -1437,6 +1441,7 @@ void Transform::preprocess(unsigned unroll_factor) {
 
           if (!seen) {
             seen = true;
+            lt.nodes[current] = cur;
             lt.number[cur] = current++;
             worklist.push_back(cur);
             for (auto child : lt.node_data[cur].succs)
@@ -1546,8 +1551,23 @@ void Transform::preprocess(unsigned unroll_factor) {
         }
 
         // update instruction operands
-        // TODO
-
+        auto users = fn->getUsers();
+        // traverse nodes in reverse preorder
+        for (auto i = lt.nodes.size() - 1; i >= 0; --i) {
+          for (auto i_dupe : unroll_data[lt.nodes[i]].dupes) {
+            auto its = users.equal_range(i_dupe.first);
+            for (auto I = its.first, E = its.second; I != E; ++I) {
+              auto instr = (Instr*) I->second;
+              if (auto phi = dynamic_cast<Phi*>(instr))
+                continue;
+              auto containing_bb = *instr->containingBB();
+              auto c_bb_id = lt.bb_map[containing_bb];
+              // if dupe declaration is ancestor of use -> replace
+              if (isAncestor(lt.nodes[i], c_bb_id))
+                instr->rauw(I->first, i_dupe.second);
+            }
+          }
+        }
 
         // update BB_order in function for the desired topological order
         auto &bbs = fn->getBBs();
