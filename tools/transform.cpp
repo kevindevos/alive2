@@ -1111,6 +1111,7 @@ void Transform::preprocess(unsigned unroll_factor) {
     // id of loop in which this bb was last duped in
     optional<unsigned> prev_loop_dupe;
     bool pre_duped = false;
+    // instructions that were duplicated given original and new in this bb
     vector<pair<Instr*, Instr*>> dupes;
     // suffix for bb name
     string suffix;
@@ -1135,9 +1136,11 @@ void Transform::preprocess(unsigned unroll_factor) {
       unsigned num_duped_bbs = 0;
       optional<BasicBlock*> sink;
 
+      // all dupes and the bb_id they were created for a given instr
       unordered_map<Value*, list<pair<unsigned, Value*>>> instr_dupes;
+
+      // keep edges to merges to check for phis
       vector<tuple<unsigned, unsigned, bool>> merge_in_edges;
-      unordered_map<Value*, Value*> instr_duped_from;
 
       // Prepare data structure for unroll algorithm
       for (auto node : lt.node_data) {
@@ -1185,7 +1188,6 @@ void Transform::preprocess(unsigned unroll_factor) {
         for (auto &i : bb_first_orig->instrs()) {
           newbb->addInstr(i.dup(suffix));
           instr_dupes[i].emplace_back(id, &newbb->back());
-          instr_duped_from[id] = i;
           unroll_data[id].dupes.emplace_back(i, &newbb->back());
         }
         unroll_data[id].suffix = move(suffix);
@@ -1456,6 +1458,14 @@ void Transform::preprocess(unsigned unroll_factor) {
           }
         }
 
+        // update BB_order in function for the desired topological order
+        auto &bbs = fn->getBBs();
+        bbs.clear();
+        for (auto I = sorted.rbegin(), E = sorted.rend(); I != E; ++I)
+          bbs.emplace_back(lt.node_data[*I].bb);
+        if (sink)
+          bbs.emplace_back(*sink);
+
         // check if a_id is ancestor of b_id
         // credit to paper & authors:
         // Havlak, Paul (1997). Nesting of Reducible and Irreducible Loops.
@@ -1465,6 +1475,12 @@ void Transform::preprocess(unsigned unroll_factor) {
           return a_num <= b_num && b_num <= lt.last[a_num];
         }
 
+        ////// possible issues for Phi and operand updating code
+        // - phi creation having name that conflicts with another
+        //   check existing var already and adjust name?
+        // - new dupe of var in bb but use right after in same bb may not be
+        //   updated due to required instr-wise instead of bb-wise precision
+        // - in entries handling, use could be just a constant
 
         // update phi entries and add phi instructions when necessary
         visited.clear();
@@ -1480,32 +1496,40 @@ void Transform::preprocess(unsigned unroll_factor) {
           unordered_set<Instr*> seen_uses;
 
           if (became_merge) { // check for new phi instrs only when became merge
-            for (auto instr : target_data.bb->instrs())
-              for (auto use : instr.operands())
+            for (auto instr : target_data.bb->instrs()) {
+              for (auto use : instr.operands()) {
+                // avoid same use twice
+                if (seen_uses.find(use) != seen_uses.end())
+                  continue;
                 seen_uses.insert(use);
 
-            for (auto use : seen_uses) {
-              auto first_pred_id = target_data.preds.front().second;
-              for (auto [c, pred_] : target_data.preds) {
-                unsigned idx = 0;
-                auto &use_dupes = instr_dupes[use];
-                for (auto [use_dupe_id, val] : use_dupes) {
-                  if (isAncestor(use_dupe_id, pred_) &&
-                      !isAncestor(use_dupe_id, first_pred_id)) {
-                    auto &suffix = unroll_data[target].suffix;
-                    // TODO phi variable name conflict?
-                    auto phi = make_unique<Phi>(use->getType(),
-                                                use->getName() + suffix);
-                    use_dupes.emplace(use_dupes.begin() + idx, target, phi);
-                    made_phi = true;
-                    target_data.bb->addInstrFront(move(phi));
-                    use_for_phi[&(*target_data.bb->instrs().begin())] = use;
-                    goto loop_next_use;
+                auto first_pred = target_data.preds.front().second;
+
+                // check for each pred if use was duped on path to pred
+                for (auto [c, pred_] : target_data.preds) {
+                  (void)c;
+                  if (pred_ == first_pred)
+                    continue;
+
+                  auto &use_dupes = instr_dupes[use];
+                  unsigned i = 0;
+                  for (auto [use_dupe_bb_id, val] : use_dupes) {
+                    if (isAncestor(use_dupe_bb_id, pred_) &&
+                        !isAncestor(use_dupe_bb_id, first_pred)) {
+                      auto &suffix = unroll_data[target].suffix;
+                      // TODO phi variable name conflict?
+                      auto phi = make_unique<Phi>(use->getType(),
+                                                  use->getName() + suffix);
+                      use_dupes.emplace(use_dupes.begin() + i, target, phi);
+                      phi_use[&(*phi)] = use;
+                      target_data.bb->addInstrFront(move(phi));
+                      goto next_use;
+                    }
+                    ++i;
                   }
-                  ++i;
                 }
+next_use:
               }
-  loop_next_use:
             }
           }
 
@@ -1518,27 +1542,29 @@ void Transform::preprocess(unsigned unroll_factor) {
 
               // update existing entries
               for (auto &[val, bb_name] : phi->getValues()) {
-                auto entry_bb_id = lt.bb_map[&fn->getBB(bb_name)];
-                seen_entries.insert(entry_bb_id);
+                auto bb = lt.bb_map[&fn->getBB(bb_name)];
+                seen_entries.insert(bb);
+
                 auto &dupes = instr_dupes[use];
                 for (auto i = 1; i < dupes.size(); ++i) {
-                  if (!isAncestor(dupes[i].first, entry_bb_id)) {
-                    val = dupes[i].second;
+                  if (!isAncestor(dupes[i].first, bb)) {
+                    val = dupes[i-1].second;
                     break;
                   }
                 }
               }
 
-              // add new entries
+              // add new entries missing for some preds
               for (auto [c, pred] : target_data.preds]) {
                 (void)c;
                 Value* val;
                 if (seen_entries.find(pred) != seen_entries.end())
                   continue;
+
                 auto &dupes = instr_dupes[use];
                 for (auto i = 1; i < dupes.size(); ++i) {
-                  if (!isAncestor(dupes[i].first, entry_bb_id)) {
-                    val = dupes[i].second;
+                  if (!isAncestor(dupes[i].first, pred)) {
+                    val = dupes[i-1].second;
                     break;
                   }
                 }
@@ -1550,32 +1576,25 @@ void Transform::preprocess(unsigned unroll_factor) {
           }
         }
 
-        // update instruction operands
+        // update instruction operands by traversing bb's in reverse preorder
         auto users = fn->getUsers();
-        // traverse nodes in reverse preorder
-        for (auto i = lt.nodes.size() - 1; i >= 0; --i) {
+        for (auto i = lt.nodes.size() - 1; i > -1; --i) {
           for (auto i_dupe : unroll_data[lt.nodes[i]].dupes) {
             auto its = users.equal_range(i_dupe.first);
             for (auto I = its.first, E = its.second; I != E; ++I) {
               auto instr = (Instr*) I->second;
+              // ignore phi - handled above
               if (auto phi = dynamic_cast<Phi*>(instr))
                 continue;
+
+              // if dupe of declaration is ancestor of use then replace
               auto containing_bb = *instr->containingBB();
               auto c_bb_id = lt.bb_map[containing_bb];
-              // if dupe declaration is ancestor of use -> replace
               if (isAncestor(lt.nodes[i], c_bb_id))
                 instr->rauw(I->first, i_dupe.second);
             }
           }
         }
-
-        // update BB_order in function for the desired topological order
-        auto &bbs = fn->getBBs();
-        bbs.clear();
-        for (auto I = sorted.rbegin(), E = sorted.rend(); I != E; ++I)
-          bbs.emplace_back(lt.node_data[*I].bb);
-        if (sink)
-          bbs.emplace_back(*sink);
       }
 
       // DEBUG , print unrolled dot for src only
