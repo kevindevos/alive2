@@ -1473,7 +1473,7 @@ void Transform::preprocess(unsigned unroll_factor) {
           auto a_num = lt.number[a_id];
           auto b_num = lt.number[b_id];
           return a_num <= b_num && b_num <= lt.last[a_num];
-        }
+        };
 
         ////// possible issues for Phi and operand updating code
         // - phi creation having name that conflicts with another
@@ -1498,7 +1498,7 @@ void Transform::preprocess(unsigned unroll_factor) {
           if (became_merge) { // check for new phi instrs only when became merge
             for (auto instr : target_data.bb->instrs()) {
               for (auto use : instr.operands()) {
-                // avoid same use twice
+                // avoid checking same use twice
                 if (seen_uses.find(use) != seen_uses.end())
                   continue;
                 seen_uses.insert(use);
@@ -1533,6 +1533,14 @@ next_use:
             }
           }
 
+          // helper func to get latest Value* 'val' in merge for its pred 'pred'
+          auto get_updated_val_for_pred = [&](auto pred, auto use) -> Value* {
+            auto &dupes = instr_dupes[use];
+            for (auto i = 1; i < dupes.size(); ++i)
+              if (!isAncestor(dupes[i].first, pred))
+                return dupes[i-1].second;
+          };
+
           // phi entries
           for (auto instr : target_data.bb->instrs()) {
             if (auto phi = dynamic_cast<Phi*>(&instr)) {
@@ -1542,33 +1550,17 @@ next_use:
 
               // update existing entries
               for (auto &[val, bb_name] : phi->getValues()) {
-                auto bb = lt.bb_map[&fn->getBB(bb_name)];
-                seen_entries.insert(bb);
-
-                auto &dupes = instr_dupes[use];
-                for (auto i = 1; i < dupes.size(); ++i) {
-                  if (!isAncestor(dupes[i].first, bb)) {
-                    val = dupes[i-1].second;
-                    break;
-                  }
-                }
+                auto pred = lt.bb_map[&fn->getBB(bb_name)];
+                seen_entries.insert(pred);
+                phi->rauw(val, get_updated_val_for_pred(pred, use));
               }
 
               // add new entries missing for some preds
-              for (auto [c, pred] : target_data.preds]) {
-                (void)c;
-                Value* val;
-                if (seen_entries.find(pred) != seen_entries.end())
+              for (auto pred : target_data.preds]) {
+                if (seen_entries.find(pred.second) != seen_entries.end())
                   continue;
-
-                auto &dupes = instr_dupes[use];
-                for (auto i = 1; i < dupes.size(); ++i) {
-                  if (!isAncestor(dupes[i].first, pred)) {
-                    val = dupes[i-1].second;
-                    break;
-                  }
-                }
-                phi->addValue(val, lt.node_data[pred].bb->getName());
+                phi->addValue(get_updated_val_for_pred(pred.second, use),
+                              lt.node_data[pred.second].bb->getName());
               }
             } else {
               break;
