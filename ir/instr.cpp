@@ -1801,7 +1801,7 @@ void Phi::removeValue(const std::string &BB_name) {
 vector<pair<Value*, string>> Phi::getValues() {
   vector<pair<Value*, string>> v;
   for (auto &[val, bb] : values)
-    v.emplace_back(val);
+    v.emplace_back(val, bb);
   return v;
 }
 

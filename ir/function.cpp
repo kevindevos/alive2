@@ -28,12 +28,14 @@ void BasicBlock::fixupTypes(const Model &m) {
 }
 
 void BasicBlock::addInstr(unique_ptr<Instr> &&i) {
-  *(i->containingBB()) = this;
+  auto &i_bb = i->containingBB();
+  i_bb = this;
   m_instrs.push_back(move(i));
 }
 
 void BasicBlock::addInstrFront(unique_ptr<Instr> &&i) {
-  *(i->containingBB()) = this;
+  auto &i_bb = i->containingBB();
+  i_bb = this;
   m_instrs.insert(m_instrs.begin(), move(i));
 }
 

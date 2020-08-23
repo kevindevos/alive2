@@ -1112,7 +1112,7 @@ void Transform::preprocess(unsigned unroll_factor) {
     optional<unsigned> prev_loop_dupe;
     bool pre_duped = false;
     // instructions that were duplicated given original and new in this bb
-    vector<pair<Instr*, Instr*>> dupes;
+    vector<pair<Value*, Value*>> dupes;
     // suffix for bb name
     string suffix;
   };
@@ -1187,8 +1187,9 @@ void Transform::preprocess(unsigned unroll_factor) {
         // manually dupe instrs and update instr_dupes and unroll_data.dupes
         for (auto &i : bb_first_orig->instrs()) {
           newbb->addInstr(i.dup(suffix));
-          instr_dupes[i].emplace_back(id, &newbb->back());
-          unroll_data[id].dupes.emplace_back(i, &newbb->back());
+          auto i_val = (Value*) &i;
+          instr_dupes[i_val].emplace_back(id, &newbb->back());
+          unroll_data[id].dupes.emplace_back(i_val, &newbb->back());
         }
         unroll_data[id].suffix = move(suffix);
 
@@ -1475,8 +1476,6 @@ void Transform::preprocess(unsigned unroll_factor) {
           return a_num <= b_num && b_num <= lt.last[a_num];
         };
 
-        ////// possible issues for Phi and operand updating code
-
         // update phi entries and add phi instructions when necessary
         visited.clear();
         unordered_map<Value*, Value*> phi_use;
@@ -1488,18 +1487,17 @@ void Transform::preprocess(unsigned unroll_factor) {
           visited[target] = true;
 
           auto &target_data = lt.node_data[target];
-          unordered_set<Instr*> seen_uses;
+          unordered_set<Value*> seen_uses;
 
           if (became_merge) { // check for new phi instrs only when became merge
             for (auto &instr : target_data.bb->instrs()) {
               for (auto use : instr.operands()) {
-                if (auto cnst = dynamic_cast<Constant*>(use))
+                if (dynamic_cast<Constant*>(use))
                   continue;
                 // avoid checking same use twice
                 if (seen_uses.find(use) != seen_uses.end())
                   continue;
                 seen_uses.insert(use);
-
                 auto first_pred = target_data.preds.front().second;
 
                 // check for each pred if use was duped on path to pred
@@ -1509,39 +1507,53 @@ void Transform::preprocess(unsigned unroll_factor) {
 
                   auto &use_dupes = instr_dupes[use];
                   unsigned i = 0;
-                  for (auto [use_dupe_bb_id, val] : use_dupes) {
-                    if (isAncestor(use_dupe_bb_id, pred_) &&
+                  bool added_phi = false;
+
+                  for (auto I = use_dupes.begin(), E = use_dupes.end(); I != E;
+                       ++I) {
+                    auto [use_dupe_bb_id, val] = *I;
+
+                    if (isAncestor(use_dupe_bb_id, pred.second) &&
                         !isAncestor(use_dupe_bb_id, first_pred)) {
                       auto &sfx = unroll_data[target].suffix;
                       auto phi = make_unique<Phi>(use->getType(),
                                                   use->getName() + sfx + "phi");
-                      use_dupes.emplace(use_dupes.begin() + i, target, phi);
+                      use_dupes.emplace(++I, target, &(*phi));
                       phi_use[&(*phi)] = use;
                       target_data.bb->addInstrFront(move(phi));
-                      goto next_use;
+                      added_phi = true;
+                      break;
                     }
                     ++i;
                   }
+                  if (added_phi)
+                    break;
                 }
-next_use:
               }
             }
           }
 
           // helper func to get latest Value* 'val' in merge for its pred 'pred'
-          auto get_updated_val_for_pred = [&](auto pred, auto use) -> Value* {
+          function<optional<Value*>(unsigned, Value*)> get_updated_val_for_pred;
+          get_updated_val_for_pred = [&](unsigned pred, Value* use) {
+            optional<Value*> val;
             auto &dupes = instr_dupes[use];
-            for (auto i = 1; i < dupes.size(); ++i)
-              if (!isAncestor(dupes[i].first, pred))
-                return dupes[i-1].second;
+            for (auto I = dupes.begin(), E = dupes.end(); I != E; ++I) {
+              auto id = I->first;
+              if (!isAncestor(id, pred)) {
+                val = (--I)->second;
+                break;
+              }
+            }
+            return val;
           };
 
           // phi entries
           for (auto &instr : target_data.bb->instrs()) {
-            if (auto phi = dynamic_cast<Phi*>(&instr)) {
+            if (auto phi = dynamic_cast<Phi*>(const_cast<Instr*>(&instr))) {
               auto no_entries = phi->operands().empty();
               auto use = no_entries ? phi_use[phi] : phi->operands().front();
-              if (auto cnst = dynamic_cast<Constant*>(use))
+              if (dynamic_cast<Constant*>(use))
                   continue;
               unordered_set<unsigned> seen_entries;
 
@@ -1549,15 +1561,20 @@ next_use:
               for (auto &[val, bb_name] : phi->getValues()) {
                 auto pred = lt.bb_map[&fn->getBB(bb_name)];
                 seen_entries.insert(pred);
-                phi->rauw(val, get_updated_val_for_pred(pred, use));
+                auto updated_val = get_updated_val_for_pred(pred, use);
+                if (updated_val)
+                  phi->rauw(*val, **updated_val);
               }
 
               // add new entries missing for some preds
-              for (auto &pred : target_data.preds]) {
+              for (auto &pred : target_data.preds) {
                 if (seen_entries.find(pred.second) != seen_entries.end())
                   continue;
-                phi->addValue(get_updated_val_for_pred(pred.second, use),
-                              lt.node_data[pred.second].bb->getName());
+                auto updated_val = get_updated_val_for_pred(pred.second, use);
+                if (updated_val) {
+                  auto name = lt.node_data[pred.second].bb->getName();
+                  phi->addValue(**updated_val, move(name));
+                }
               }
             } else {
               break;
@@ -1567,25 +1584,26 @@ next_use:
 
         // update instruction operands by traversing bb's in reverse preorder
         auto users = fn->getUsers();
-        for (auto i = lt.nodes.size() - 1; i > -1; --i) {
+        for (int i = lt.nodes.size() - 1; i > -1; --i) {
           for (auto &i_dupe : unroll_data[lt.nodes[i]].dupes) {
             auto its = users.equal_range(i_dupe.first);
 
             for (auto I = its.first, E = its.second; I != E; ++I) {
               auto instr = (Instr*) I->second;
-              if (auto phi = dynamic_cast<Phi*>(instr))
+              if (dynamic_cast<Phi*>(instr))
                 continue;
 
               // if dupe of declaration is ancestor of use then replace
               auto containing_bb = *instr->containingBB();
-              auto c_bb_id = lt.bb_map[containing_bb];
+              int c_bb_id = lt.bb_map[containing_bb];
               if (isAncestor(lt.nodes[i], c_bb_id)) {
                 // if same bb, verify use comes after declaration
                 auto what = I->first;
+                auto with = (Value*) i_dupe.second;
                 bool use_before_decl = false;
                 if (lt.nodes[i] == c_bb_id) {
                   for (auto &instr : containing_bb->instrs()) {
-                    if (&instr == i_dupe.second)
+                    if (&instr == with)
                       break;
                     if (&instr == what) {
                       use_before_decl = true;
@@ -1594,7 +1612,7 @@ next_use:
                   }
                 }
                 if (!use_before_decl)
-                  instr->rauw(what, i_dupe.second);
+                  instr->rauw(*what, *with);
               }
             }
           }
