@@ -18,6 +18,7 @@
 #include <set>
 #include <sstream>
 #include <stack>
+#include <list>
 
 using namespace IR;
 using namespace smt;
@@ -1110,7 +1111,6 @@ void Transform::preprocess(unsigned unroll_factor) {
     // id of loop in which this bb was last duped in
     optional<unsigned> prev_loop_dupe;
     bool pre_duped = false;
-    vector<pair<Value*, Value*>> dupes;
     // suffix for bb name
     string suffix;
   };
@@ -1134,7 +1134,7 @@ void Transform::preprocess(unsigned unroll_factor) {
       unsigned num_duped_bbs = 0;
       optional<BasicBlock*> sink;
 
-      unordered_map<Value*, vector<pair<unsigned, Value*>>> instr_dupes;
+      unordered_map<Value*, list<pair<unsigned, Value*>>> instr_dupes;
       vector<tuple<unsigned, unsigned, bool>> merge_in_edges;
       unordered_map<Value*, Value*> instr_duped_from;
 
@@ -1184,7 +1184,6 @@ void Transform::preprocess(unsigned unroll_factor) {
         for (auto &i : bb_first_orig->instrs()) {
           newbb->addInstr(i.dup(suffix));
           instr_dupes[i].emplace_back(id, &newbb->back());
-          unroll_data[id].dupes.emplace_back(i, &newbb->back());
           instr_duped_from[id] = i;
         }
         unroll_data[id].suffix = move(suffix);
@@ -1485,19 +1484,23 @@ void Transform::preprocess(unsigned unroll_factor) {
 
             for (auto use : seen_uses) {
               auto first_pred_id = target_data.preds.front().second;
-              for (auto [use_dupe_id, val] : instr_dupes[use]) {
-                for (auto [c, pred_] : target_data.preds) {
+              for (auto [c, pred_] : target_data.preds) {
+                unsigned idx = 0;
+                auto &use_dupes = instr_dupes[use];
+                for (auto [use_dupe_id, val] : use_dupes) {
                   if (isAncestor(use_dupe_id, pred_) &&
                       !isAncestor(use_dupe_id, first_pred_id)) {
                     auto &suffix = unroll_data[target].suffix;
+                    // TODO phi variable name conflict?
                     auto phi = make_unique<Phi>(use->getType(),
                                                 use->getName() + suffix);
-                    // T O D O make phi a new dupe of this use in the right place
+                    use_dupes.emplace(use_dupes.begin() + idx, target, phi);
                     made_phi = true;
                     target_data.bb->addInstrFront(move(phi));
                     use_for_phi[&(*target_data.bb->instrs().begin())] = use;
                     goto loop_next_use;
                   }
+                  ++i;
                 }
               }
   loop_next_use:
