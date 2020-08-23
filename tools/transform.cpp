@@ -1480,7 +1480,7 @@ void Transform::preprocess(unsigned unroll_factor) {
         //   check existing var already and adjust name?
         // - new dupe of var in bb but use right after in same bb may not be
         //   updated due to required instr-wise instead of bb-wise precision
-        // - in entries handling, use could be just a constant
+        // - assumes programs will have expected phi structure
 
         // update phi entries and add phi instructions when necessary
         visited.clear();
@@ -1498,6 +1498,8 @@ void Transform::preprocess(unsigned unroll_factor) {
           if (became_merge) { // check for new phi instrs only when became merge
             for (auto instr : target_data.bb->instrs()) {
               for (auto use : instr.operands()) {
+                if (auto cnst = dynamic_cast<Constant*>(use))
+                  continue;
                 // avoid checking same use twice
                 if (seen_uses.find(use) != seen_uses.end())
                   continue;
@@ -1546,6 +1548,8 @@ next_use:
             if (auto phi = dynamic_cast<Phi*>(&instr)) {
               auto no_entries = phi->operands().empty();
               auto use = no_entries ? phi_use[phi] : phi->operands().front();
+              if (auto cnst = dynamic_cast<Constant*>(use))
+                  continue;
               unordered_set<unsigned> seen_entries;
 
               // update existing entries
@@ -1573,9 +1577,9 @@ next_use:
         for (auto i = lt.nodes.size() - 1; i > -1; --i) {
           for (auto i_dupe : unroll_data[lt.nodes[i]].dupes) {
             auto its = users.equal_range(i_dupe.first);
+
             for (auto I = its.first, E = its.second; I != E; ++I) {
               auto instr = (Instr*) I->second;
-              // ignore phi - handled above
               if (auto phi = dynamic_cast<Phi*>(instr))
                 continue;
 
