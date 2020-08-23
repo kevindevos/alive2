@@ -1491,7 +1491,7 @@ void Transform::preprocess(unsigned unroll_factor) {
           unordered_set<Instr*> seen_uses;
 
           if (became_merge) { // check for new phi instrs only when became merge
-            for (auto instr : target_data.bb->instrs()) {
+            for (auto &instr : target_data.bb->instrs()) {
               for (auto use : instr.operands()) {
                 if (auto cnst = dynamic_cast<Constant*>(use))
                   continue;
@@ -1503,9 +1503,8 @@ void Transform::preprocess(unsigned unroll_factor) {
                 auto first_pred = target_data.preds.front().second;
 
                 // check for each pred if use was duped on path to pred
-                for (auto [c, pred_] : target_data.preds) {
-                  (void)c;
-                  if (pred_ == first_pred)
+                for (auto pred : target_data.preds) {
+                  if (pred.second == first_pred)
                     continue;
 
                   auto &use_dupes = instr_dupes[use];
@@ -1515,7 +1514,7 @@ void Transform::preprocess(unsigned unroll_factor) {
                         !isAncestor(use_dupe_bb_id, first_pred)) {
                       auto &sfx = unroll_data[target].suffix;
                       auto phi = make_unique<Phi>(use->getType(),
-                                                  use->getName() + sfx + 'phi');
+                                                  use->getName() + sfx + "phi");
                       use_dupes.emplace(use_dupes.begin() + i, target, phi);
                       phi_use[&(*phi)] = use;
                       target_data.bb->addInstrFront(move(phi));
@@ -1538,7 +1537,7 @@ next_use:
           };
 
           // phi entries
-          for (auto instr : target_data.bb->instrs()) {
+          for (auto &instr : target_data.bb->instrs()) {
             if (auto phi = dynamic_cast<Phi*>(&instr)) {
               auto no_entries = phi->operands().empty();
               auto use = no_entries ? phi_use[phi] : phi->operands().front();
@@ -1554,7 +1553,7 @@ next_use:
               }
 
               // add new entries missing for some preds
-              for (auto pred : target_data.preds]) {
+              for (auto &pred : target_data.preds]) {
                 if (seen_entries.find(pred.second) != seen_entries.end())
                   continue;
                 phi->addValue(get_updated_val_for_pred(pred.second, use),
@@ -1569,7 +1568,7 @@ next_use:
         // update instruction operands by traversing bb's in reverse preorder
         auto users = fn->getUsers();
         for (auto i = lt.nodes.size() - 1; i > -1; --i) {
-          for (auto i_dupe : unroll_data[lt.nodes[i]].dupes) {
+          for (auto &i_dupe : unroll_data[lt.nodes[i]].dupes) {
             auto its = users.equal_range(i_dupe.first);
 
             for (auto I = its.first, E = its.second; I != E; ++I) {
@@ -1585,7 +1584,7 @@ next_use:
                 auto what = I->first;
                 bool use_before_decl = false;
                 if (lt.nodes[i] == c_bb_id) {
-                  for (auto instr : containing_bb->instrs()) {
+                  for (auto &instr : containing_bb->instrs()) {
                     if (&instr == i_dupe.second)
                       break;
                     if (&instr == what) {
