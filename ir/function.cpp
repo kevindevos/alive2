@@ -31,6 +31,11 @@ void BasicBlock::addInstr(unique_ptr<Instr> &&i) {
   m_instrs.push_back(move(i));
 }
 
+void BasicBlock::addInstrFront(unique_ptr<Instr> &&i) {
+  m_instrs.insert(m_instrs.begin(), move(i));
+}
+
+
 void BasicBlock::delInstr(Instr *i) {
   for (auto I = m_instrs.begin(), E = m_instrs.end(); I != E; ++I) {
     if (I->get() == i) {
@@ -40,11 +45,12 @@ void BasicBlock::delInstr(Instr *i) {
   }
 }
 
-unique_ptr<BasicBlock> BasicBlock::dup(const string &suffix) const {
+unique_ptr<BasicBlock> BasicBlock::dup(const string &suffix,
+                                       bool with_instrs = true) const {
   auto newbb = make_unique<BasicBlock>(name + suffix);
-  for (auto &i : instrs()) {
-    newbb->addInstr(i.dup(suffix));
-  }
+  if (with_instrs)
+    for (auto &i : instrs())
+      newbb->addInstr(i.dup(suffix));
   return newbb;
 }
 

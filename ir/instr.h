@@ -314,6 +314,7 @@ public:
   void addValue(Value &val, std::string &&BB_name);
   void removeValue(const std::string &BB_name);
 
+  std::vector<std::pair<Value*, std::string>> getValues();
   std::vector<Value*> operands() const override;
   void rauw(const Value &what, Value &with) override;
   void print(std::ostream &os) const override;

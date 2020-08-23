@@ -38,6 +38,7 @@ public:
   void fixupTypes(const smt::Model &m);
 
   void addInstr(std::unique_ptr<Instr> &&i);
+  void addInstrFront(std::unique_ptr<Instr> &&i);
   void delInstr(Instr *i);
 
   util::const_strip_unique_ptr<decltype(m_instrs)> instrs() const {
@@ -48,7 +49,8 @@ public:
 
   bool empty() const { return m_instrs.empty(); }
 
-  std::unique_ptr<BasicBlock> dup(const std::string &suffix) const;
+  std::unique_ptr<BasicBlock> dup(const std::string &suffix,
+                                  bool with_instrs) const;
 
   friend std::ostream& operator<<(std::ostream &os, const BasicBlock &bb);
 };
@@ -237,7 +239,6 @@ private:
       void clear() { bb_set.clear(); }
   };
 
-  std::vector<unsigned> last; // preorder -> preorder
   // vector of pointers to allow efficient UNION and FIND operations
   std::vector<Vecset*> vecsets;
   std::vector<Vecset> vecsets_data;
@@ -245,13 +246,16 @@ private:
   // id's of bb's that are loop headers
   std::vector<unsigned> loop_header_ids;
 
-  // bb -> bb id
-  std::unordered_map<const BasicBlock*, unsigned> bb_map;
 
   unsigned vecsetFind(unsigned bb);
   void vecsetUnion(unsigned from, unsigned to);
   void buildLoopTree();
 public:
+  std::vector<unsigned> last; // preorder -> preorder
+
+  // bb -> bb id
+  std::unordered_map<const BasicBlock*, unsigned> bb_map;
+
   std::vector<NodeData> node_data;
   // bb id of loop header -> loop data
   std::vector<LoopData> loop_data;

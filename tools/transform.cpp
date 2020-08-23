@@ -1110,6 +1110,9 @@ void Transform::preprocess(unsigned unroll_factor) {
     // id of loop in which this bb was last duped in
     optional<unsigned> prev_loop_dupe;
     bool pre_duped = false;
+    vector<pair<Value*, Value*>> dupes;
+    // suffix for bb name
+    string suffix;
   };
 
   if (k > 0) {
@@ -1130,6 +1133,10 @@ void Transform::preprocess(unsigned unroll_factor) {
       optional<unsigned> last_duped_header;
       unsigned num_duped_bbs = 0;
       optional<BasicBlock*> sink;
+
+      unordered_map<Value*, vector<pair<unsigned, Value*>>> instr_dupes;
+      vector<tuple<unsigned, unsigned, bool>> merge_in_edges;
+      unordered_map<Value*, Value*> instr_duped_from;
 
       // Prepare data structure for unroll algorithm
       for (auto node : lt.node_data) {
@@ -1161,13 +1168,27 @@ void Transform::preprocess(unsigned unroll_factor) {
 
         unroll_data.emplace_back();
         auto &u_bb_data = unroll_data[bb];
+
+        // get bb suffix
         auto &dupe_counter = unroll_data[u_bb_data.first_original].dupe_counter;
         auto bb_first_orig = lt.node_data[u_bb_data.first_original].bb;
         string suffix = "_#" + to_string(++dupe_counter);
-        auto bb_ptr = bb_first_orig->dup(suffix);
-        auto ins_bb = fn->addBB(move(*bb_ptr));
+
+        // dupe bb without instrs
+        auto newbb = bb_first_orig->dup(suffix, false);
+        auto ins_bb = fn->addBB(move(*newbb));
 
         auto id = lt.node_data.size();
+
+        // manually dupe instrs and update instr_dupes and unroll_data.dupes
+        for (auto &i : bb_first_orig->instrs()) {
+          newbb->addInstr(i.dup(suffix));
+          instr_dupes[i].emplace_back(id, &newbb->back());
+          unroll_data[id].dupes.emplace_back(i, &newbb->back());
+          instr_duped_from[id] = i;
+        }
+        unroll_data[id].suffix = move(suffix);
+
         lt.node_data.emplace_back();
         if (id >= lt.loop_data.size())
           lt.loop_data.emplace_back();
@@ -1238,6 +1259,11 @@ void Transform::preprocess(unsigned unroll_factor) {
         auto &src_data = lt.node_data[src];
         auto instr = (JumpInstr*) &src_data.bb->back();
         bool replaced = false;
+
+        // keep edge for checking phi entries
+        auto &dst_data = lt.node_data[dst];
+        if (dst_data.preds.size() > 0)
+          merge_in_edges.emplace_back(src, dst, dst_data.preds.size() == 1);
 
         if (replace) {
           replaced = instr->replaceTarget(cond, *lt.node_data[dst].bb);
@@ -1394,6 +1420,13 @@ void Transform::preprocess(unsigned unroll_factor) {
       }
 
       // topsort in sort.h but specific to the data structures here + iterative
+      // also build new preorder + last numbering
+      lt.last.clear();
+      lt.last.resize(lt.node_data.size());
+      lt.number.clear();
+      lt.number.resize(lt.node_data.size());
+      unsigned current = 0;
+
       if (num_duped_bbs > 0) {
         vector<unsigned> sorted;
         vector<unsigned> worklist;
@@ -1408,17 +1441,113 @@ void Transform::preprocess(unsigned unroll_factor) {
 
           if (!seen) {
             seen = true;
+            lt.number[cur] = current++;
             worklist.push_back(cur);
             for (auto child : lt.node_data[cur].succs)
               if (!child.second.second && !marked[child.first].first)
                 worklist.push_back(child.first);
           } else {
             if (!pushed) {
+              lt.last[lt.number[cur]] = current - 1;
               sorted.emplace_back(cur);
               pushed = true;
             }
           }
         }
+
+        // check if a_id is ancestor of b_id
+        // credit to paper & authors:
+        // Havlak, Paul (1997). Nesting of Reducible and Irreducible Loops.
+        auto isAncestor = [&](unsigned a_id, unsigned b_id) -> bool {
+          auto a_num = lt.number[a_id];
+          auto b_num = lt.number[b_id];
+          return a_num <= b_num && b_num <= lt.last[a_num];
+        }
+
+
+        // update phi entries and add phi instructions when necessary
+        visited.clear();
+        unordered_map<Value*, Value*> phi_use;
+
+        // check if necessary to add phi instructions
+        for (auto [pred, target, became_merge] : merge_in_edges) {
+          if (visited[target])
+            continue;
+          visited[target] = true;
+
+          auto &target_data = lt.node_data[target];
+          unordered_set<Instr*> seen_uses;
+
+          if (became_merge) { // check for new phi instrs only when became merge
+            for (auto instr : target_data.bb->instrs())
+              for (auto use : instr.operands())
+                seen_uses.insert(use);
+
+            for (auto use : seen_uses) {
+              auto first_pred_id = target_data.preds.front().second;
+              for (auto [use_dupe_id, val] : instr_dupes[use]) {
+                for (auto [c, pred_] : target_data.preds) {
+                  if (isAncestor(use_dupe_id, pred_) &&
+                      !isAncestor(use_dupe_id, first_pred_id)) {
+                    auto &suffix = unroll_data[target].suffix;
+                    auto phi = make_unique<Phi>(use->getType(),
+                                                use->getName() + suffix);
+                    // T O D O make phi a new dupe of this use in the right place
+                    made_phi = true;
+                    target_data.bb->addInstrFront(move(phi));
+                    use_for_phi[&(*target_data.bb->instrs().begin())] = use;
+                    goto loop_next_use;
+                  }
+                }
+              }
+  loop_next_use:
+            }
+          }
+
+          // phi entries
+          for (auto instr : target_data.bb->instrs()) {
+            if (auto phi = dynamic_cast<Phi*>(&instr)) {
+              auto no_entries = phi->operands().empty();
+              auto use = no_entries ? phi_use[phi] : phi->operands().front();
+              unordered_set<unsigned> seen_entries;
+
+              // update existing entries
+              for (auto &[val, bb_name] : phi->getValues()) {
+                auto entry_bb_id = lt.bb_map[&fn->getBB(bb_name)];
+                seen_entries.insert(entry_bb_id);
+                auto &dupes = instr_dupes[use];
+                for (auto i = 1; i < dupes.size(); ++i) {
+                  if (!isAncestor(dupes[i].first, entry_bb_id)) {
+                    val = dupes[i].second;
+                    break;
+                  }
+                }
+              }
+
+              // add new entries
+              for (auto [c, pred] : target_data.preds]) {
+                (void)c;
+                Value* val;
+                if (seen_entries.find(pred) != seen_entries.end())
+                  continue;
+                auto &dupes = instr_dupes[use];
+                for (auto i = 1; i < dupes.size(); ++i) {
+                  if (!isAncestor(dupes[i].first, entry_bb_id)) {
+                    val = dupes[i].second;
+                    break;
+                  }
+                }
+                phi->addValue(val, lt.node_data[pred].bb->getName());
+              }
+            } else {
+              break;
+            }
+          }
+        }
+
+        // update instruction operands
+        // TODO
+
 
         // update BB_order in function for the desired topological order
         auto &bbs = fn->getBBs();
