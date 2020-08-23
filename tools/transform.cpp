@@ -18,6 +18,7 @@
 #include <set>
 #include <sstream>
 #include <stack>
+#include <list>
 
 using namespace IR;
 using namespace smt;
@@ -1110,6 +1111,11 @@ void Transform::preprocess(unsigned unroll_factor) {
     // id of loop in which this bb was last duped in
     optional<unsigned> prev_loop_dupe;
     bool pre_duped = false;
+    // instructions that were duplicated given original and new in this bb
+    list<pair<Value*, Value*>> dupes;
+    unsigned num_preds_changed_to_sink;
+    // suffix for bb name
+    string suffix;
   };
 
   if (k > 0) {
@@ -1130,6 +1136,12 @@ void Transform::preprocess(unsigned unroll_factor) {
       optional<unsigned> last_duped_header;
       unsigned num_duped_bbs = 0;
       optional<BasicBlock*> sink;
+
+      // all dupes and the bb_id they were created for a given instr
+      unordered_map<Value*, list<pair<unsigned, Value*>>> instr_dupes;
+
+      // keep edges to merges to check for phis
+      unordered_map<unsigned, pair<unsigned, bool>> merge_in_edges;
 
       // Prepare data structure for unroll algorithm
       for (auto node : lt.node_data) {
@@ -1161,13 +1173,34 @@ void Transform::preprocess(unsigned unroll_factor) {
 
         unroll_data.emplace_back();
         auto &u_bb_data = unroll_data[bb];
+
+        // get bb suffix
         auto &dupe_counter = unroll_data[u_bb_data.first_original].dupe_counter;
         auto bb_first_orig = lt.node_data[u_bb_data.first_original].bb;
         string suffix = "_#" + to_string(++dupe_counter);
-        auto bb_ptr = bb_first_orig->dup(suffix);
-        auto ins_bb = fn->addBB(move(*bb_ptr));
+
+        // dupe bb without instrs
+        auto newbb = bb_first_orig->dup(suffix, false);
+        auto ins_bb = fn->addBB(move(*newbb));
 
         auto id = lt.node_data.size();
+        lt.bb_map[ins_bb] = id;
+
+        // manually dupe instrs and update instr_dupes and unroll_data.dupes
+        for (auto &i : bb_first_orig->instrs()) {
+          ins_bb->addInstr(move(i.dup(suffix)));
+          auto i_val = (Value*) &i;
+
+          // TODO does alive support invoke? only terminator instr that does not
+          // return 'void' value
+          // do not store dupes of instrs that just return 'void'
+          if (&i != &bb_first_orig->back()) {
+            instr_dupes[i_val].emplace_back(id, &ins_bb->back());
+            unroll_data[id].dupes.emplace_back(i_val, &ins_bb->back());
+          }
+        }
+        unroll_data[id].suffix = move(suffix);
+
         lt.node_data.emplace_back();
         if (id >= lt.loop_data.size())
           lt.loop_data.emplace_back();
@@ -1181,9 +1214,6 @@ void Transform::preprocess(unsigned unroll_factor) {
         ins_n_data.first_header = *bb_data.first_header;
 
         auto &u_ins_data = unroll_data[id];
-
-        lt.number.push_back(lt.nodes.size());
-        lt.nodes.push_back(id);
 
         // if bb was last duped in a different loop, make it the new original
         u_ins_data.original = u_bb_data.original;
@@ -1249,11 +1279,12 @@ void Transform::preprocess(unsigned unroll_factor) {
                 auto node_handler = lt.node_data[src].succs.extract(succ);
                 node_handler.key() = dst;
                 lt.node_data[src].succs.insert(move(node_handler));
+                // TODO erase src from old_succ.preds without iterator
+                // invalidation
                 break;
               }
             }
-            for (auto &[c, pred] : lt.node_data[dst].preds)
-              if (c == cond) pred = src;
+            lt.node_data[dst].preds.emplace_back(cond, src);
           }
         }
 
@@ -1264,6 +1295,22 @@ void Transform::preprocess(unsigned unroll_factor) {
           instr->addTarget(cond, *dst_);
           lt.node_data[dst].preds.emplace_back(cond, src);
           lt.node_data[src].succs.emplace(dst, make_pair(cond, as_back));
+        }
+
+        // keep edge for checking phi entries
+        if (!replace || replaced) {
+          auto &num_preds_sink = unroll_data[dst].num_preds_changed_to_sink;
+          if (as_back)
+            ++num_preds_sink;
+          auto non_sink_preds = lt.node_data[dst].preds.size() - num_preds_sink;
+          auto &dst_d = lt.node_data[dst];
+          if (!as_back) {
+            auto &fi = dst_d.bb->front();
+            bool has_phi = dynamic_cast<Phi*>(&fi);
+            if (non_sink_preds > 1 || has_phi)
+              merge_in_edges.try_emplace(dst, src, non_sink_preds >= 2 &&
+                                                   !has_phi);
+          }
         }
       };
 
@@ -1393,8 +1440,16 @@ void Transform::preprocess(unsigned unroll_factor) {
         }
       }
 
-      // topsort in sort.h but specific to the data structures here + iterative
+      unsigned current = 0;
       if (num_duped_bbs > 0) {
+        // topsort in sort.h but specific to the data structures here + iterative
+        // also build new preorder + last numbering
+        lt.last.clear();
+        lt.number.clear();
+        lt.nodes.clear();
+        lt.last.resize(lt.node_data.size());
+        lt.number.resize(lt.node_data.size());
+        lt.nodes.resize(lt.node_data.size());
         vector<unsigned> sorted;
         vector<unsigned> worklist;
         vector<pair<bool, bool>> marked; // <visited, pushed>
@@ -1408,12 +1463,15 @@ void Transform::preprocess(unsigned unroll_factor) {
 
           if (!seen) {
             seen = true;
+            lt.nodes[current] = cur;
+            lt.number[cur] = current++;
             worklist.push_back(cur);
             for (auto child : lt.node_data[cur].succs)
               if (!child.second.second && !marked[child.first].first)
                 worklist.push_back(child.first);
           } else {
             if (!pushed) {
+              lt.last[lt.number[cur]] = current - 1;
               sorted.emplace_back(cur);
               pushed = true;
             }
@@ -1425,8 +1483,173 @@ void Transform::preprocess(unsigned unroll_factor) {
         bbs.clear();
         for (auto I = sorted.rbegin(), E = sorted.rend(); I != E; ++I)
           bbs.emplace_back(lt.node_data[*I].bb);
-        if (sink)
-          bbs.emplace_back(*sink);
+
+        // check if a_id is ancestor of b_id
+        // credit to paper & authors:
+        // Havlak, Paul (1997). Nesting of Reducible and Irreducible Loops.
+        auto isAncestor = [&](unsigned a_id, unsigned b_id) -> bool {
+          return lt.number[a_id] <= lt.number[b_id] &&
+                 lt.number[b_id] <= lt.last[lt.number[a_id]];
+        };
+
+        // update phi entries and add phi instructions when necessary
+        unordered_map<Value*, Value*> phi_use;
+
+        // check if necessary to add phi instructions
+        for (auto [target, data] : merge_in_edges) {
+          auto &target_data = lt.node_data[target];
+          unordered_set<Value*> seen_uses;
+          vector<unique_ptr<Phi>> to_insert;
+
+          // check for new phi instrs only when became merge
+          if (data.second) {
+            for (auto &instr : target_data.bb->instrs()) {
+              for (auto use : instr.operands()) {
+                if (dynamic_cast<Constant*>(use))
+                  continue;
+                // avoid checking same use twice
+                if (seen_uses.find(use) != seen_uses.end())
+                  continue;
+                seen_uses.insert(use);
+
+                // check for each pred if use was duped on path to pred
+                auto first_pred = target_data.preds.front().second;
+                for (auto pred : target_data.preds) {
+                  if (pred.second == first_pred)
+                    continue;
+
+                  unsigned i = 0;
+                  auto &use_dupes = instr_dupes[use];
+                  for (auto I = use_dupes.begin(), E = use_dupes.end(); I != E;
+                       ++I, ++i) {
+                    auto [use_dupe_bb_id, val] = *I;
+
+                    if (isAncestor(use_dupe_bb_id, pred.second) &&
+                        !isAncestor(use_dupe_bb_id, first_pred)) {
+                      auto &sfx = unroll_data[target].suffix;
+                      auto phi = make_unique<Phi>(val->getType(),
+                                                  val->getName() +
+                                                  sfx + "_phi");
+                      auto &phi_ = to_insert.emplace_back(move(phi));
+                      use_dupes.emplace(++I, target, &(*phi_));
+                      unroll_data[target].dupes.emplace_front(use, &(*phi_));
+                      phi_use[&(*phi_)] = use;
+                      goto next_use;
+                    }
+                  }
+                }
+next_use:;
+              }
+            }
+          }
+
+          for (auto &phi : to_insert)
+            target_data.bb->addInstrFront(move(phi));
+
+          // phi entries
+          for (auto &instr : target_data.bb->instrs()) {
+            if (auto phi = dynamic_cast<Phi*>(const_cast<Instr*>(&instr))) {
+              // remove entries that are no longer predecessors
+              unordered_set<unsigned> preds;
+              // bb -> (value, removed)
+              unordered_map<unsigned, pair<Value*, bool>> entries;
+              for (auto pred : target_data.preds)
+                preds.insert(pred.second);
+              for (auto &[val, bb_name] : phi->getValues()) {
+                auto pred = lt.bb_map[&fn->getBB(bb_name)];
+                bool removed = false;
+                if (preds.find(pred) == preds.end()) {
+                  phi->removeValue(bb_name);
+                  removed = true;
+                }
+                entries.try_emplace(pred, val, removed);
+              }
+
+              // add entries
+              for (auto &pred : target_data.preds) {
+                auto orig_pred = unroll_data[pred.second].first_original;
+                auto I = entries.find(orig_pred);
+                if (I != entries.end())
+                  if (pred.second == orig_pred && !I->second.second)
+                    continue;
+
+                // for created phis grab val from phi_use
+                auto val = entries.empty() ? phi_use[phi] : I->second.first;
+
+                // if value for orig_pred entry is constant, add new entry for
+                // new bb with that constant
+                if (dynamic_cast<Constant*>(val)) {
+                  auto name = lt.node_data[pred.second].bb->getName();
+                  phi->addValue(*val, move(name));
+                  continue;
+                }
+
+                Value *updated_val = val;
+                optional<unsigned> last_decl_bb;
+                // get the deepest bb that has a decl for dupe of this var
+                // but still ancestor of pred.second
+                for (auto [decl_bb, duped_val] : instr_dupes[val]) {
+                  if (isAncestor(decl_bb, pred.second)) {
+                    if (last_decl_bb && !isAncestor(*last_decl_bb, decl_bb))
+                      continue;
+                    updated_val = duped_val;
+                    last_decl_bb = decl_bb;
+                  }
+                }
+                auto name = lt.node_data[pred.second].bb->getName();
+                phi->addValue(*updated_val, move(name));
+              }
+            } else {
+              break;
+            }
+          }
+        }
+
+        // update instruction operands by traversing bb's in reverse preorder
+        auto users = fn->getUsers();
+        for (int i = lt.nodes.size() - 1; i > -1; --i) {
+          for (auto &i_dupe : unroll_data[lt.nodes[i]].dupes) {
+            auto its = users.equal_range(i_dupe.first);
+
+            for (auto I = its.first, E = its.second; I != E;) {
+              auto instr = (Instr*) I->second;
+              if (dynamic_cast<Phi*>(instr)) {
+                ++I;
+                continue;
+              }
+
+              // if dupe of declaration is ancestor of use then replace
+              auto containing_bb = *instr->containingBB();
+              int c_bb_id = lt.bb_map[containing_bb];
+              bool erased = false;
+              if (isAncestor(lt.nodes[i], c_bb_id)) {
+                // if same bb, verify use comes after declaration
+                auto what = I->first;
+                auto with = (Value*) i_dupe.second;
+                bool use_before_decl = false;
+                if (lt.nodes[i] == c_bb_id) {
+                  for (auto &instr : containing_bb->instrs()) {
+                    if (&instr == with)
+                      break;
+                    if (&instr == what) {
+                      use_before_decl = true;
+                      break;
+                    }
+                  }
+                }
+                if (!use_before_decl) {
+                  instr->rauw(*what, *with);
+                  users.erase(I++);
+                  erased = true;
+                }
+              }
+              if (!erased) {
+                ++I;
+                erased = false;
+              }
+            }
+          }
+        }
       }
 
       // DEBUG , print unrolled dot for src only

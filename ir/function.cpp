@@ -28,23 +28,34 @@ void BasicBlock::fixupTypes(const Model &m) {
 }
 
 void BasicBlock::addInstr(unique_ptr<Instr> &&i) {
+  auto &i_bb = i->containingBB();
+  i_bb = this;
   m_instrs.push_back(move(i));
 }
+
+void BasicBlock::addInstrFront(unique_ptr<Instr> &&i) {
+  auto &i_bb = i->containingBB();
+  i_bb = this;
+  m_instrs.insert(m_instrs.begin(), move(i));
+}
+
 
 void BasicBlock::delInstr(Instr *i) {
   for (auto I = m_instrs.begin(), E = m_instrs.end(); I != E; ++I) {
     if (I->get() == i) {
+      i->containingBB().reset();
       m_instrs.erase(I);
       return;
     }
   }
 }
 
-unique_ptr<BasicBlock> BasicBlock::dup(const string &suffix) const {
+unique_ptr<BasicBlock> BasicBlock::dup(const string &suffix,
+                                       bool with_instrs = true) const {
   auto newbb = make_unique<BasicBlock>(name + suffix);
-  for (auto &i : instrs()) {
-    newbb->addInstr(i.dup(suffix));
-  }
+  if (with_instrs)
+    for (auto &i : instrs())
+      newbb->addInstr(i.dup(suffix));
   return newbb;
 }
 
@@ -296,11 +307,6 @@ void CFG::edge_iterator::next() {
   while (true) {
     if (bbi == bbe)
       return;
-
-    if ((*bbi)->empty()) {
-      ++bbi;
-      continue;
-    }
 
     if (auto instr = dynamic_cast<JumpInstr*>(&(*bbi)->back())) {
       ti = instr->targets().begin();

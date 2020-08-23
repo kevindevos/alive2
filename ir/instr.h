@@ -15,9 +15,11 @@ class Function;
 
 class Instr : public Value {
 protected:
+  std::optional<BasicBlock*> containing_bb;
   Instr(Type &type, std::string &&name) : Value(type, std::move(name)) {}
 
 public:
+  std::optional<BasicBlock*>& containingBB() { return containing_bb; }
   virtual std::vector<Value*> operands() const = 0;
   virtual void rauw(const Value &what, Value &with) = 0;
   virtual smt::expr eqType(const Instr &i) const;
@@ -314,6 +316,7 @@ public:
   void addValue(Value &val, std::string &&BB_name);
   void removeValue(const std::string &BB_name);
 
+  std::vector<std::pair<Value*, std::string>> getValues();
   std::vector<Value*> operands() const override;
   void rauw(const Value &what, Value &with) override;
   void print(std::ostream &os) const override;
