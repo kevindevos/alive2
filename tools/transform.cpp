@@ -1273,6 +1273,8 @@ void Transform::preprocess(unsigned unroll_factor) {
                 auto node_handler = lt.node_data[src].succs.extract(succ);
                 node_handler.key() = dst;
                 lt.node_data[src].succs.insert(move(node_handler));
+                // TODO erase src from old_succ.preds without iterator
+                // invalidation
                 break;
               }
             }
