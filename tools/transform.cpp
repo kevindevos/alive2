@@ -1487,6 +1487,7 @@ void Transform::preprocess(unsigned unroll_factor) {
 
         // update phi entries and add phi instructions when necessary
         visited.clear();
+        visited.resize(lt.node_data.size());
         unordered_map<Value*, Value*> phi_use;
 
         // check if necessary to add phi instructions
