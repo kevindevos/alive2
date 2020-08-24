@@ -1549,32 +1549,18 @@ void Transform::preprocess(unsigned unroll_factor) {
           for (auto &phi : to_insert)
             target_data.bb->addInstrFront(move(phi));
 
-          // helper func to get latest Value* 'val' in merge for its pred 'pred'
-          function<optional<Value*>(unsigned, Value*)> get_updated_val_for_pred;
-          get_updated_val_for_pred = [&](unsigned pred, Value* use) {
-            optional<Value*> val;
-            auto &dupes = instr_dupes[use];
-            for (auto I = dupes.begin(), E = dupes.end(); I != E; ++I) {
-              auto id = I->first;
-              if (!isAncestor(id, pred) && I != dupes.begin()) {
-                val = (--I)->second;
-                break;
-              }
-            }
-            return val;
-          };
-
           // phi entries
           for (auto &instr : target_data.bb->instrs()) {
             if (auto phi = dynamic_cast<Phi*>(const_cast<Instr*>(&instr))) {
               auto no_entries = phi->operands().empty();
               auto use = no_entries ? phi_use[phi] : phi->operands().front();
+
               // TODO does it make sense to test first phi op as constant only?
+              // should probably check for all ops, and which bbs should i check this for?
               if (dynamic_cast<Constant*>(use))
                   continue;
 
               // remove entries that are no longer predecessors
-              // n: you do want to remove without first_original, and then add new
               unordered_set<unsigned> preds;
               unordered_map<unsigned, pair<Value*, bool>> seen_entries;
               for (auto pred : target_data.preds)
@@ -1593,10 +1579,22 @@ void Transform::preprocess(unsigned unroll_factor) {
               for (auto &pred : target_data.preds) {
                 auto original_pred = unroll_data[pred.second].first_original;
                 auto [val, removed] = seen_entries[original_pred];
-                auto u_val = get_updated_val_for_pred(pred.second, val);
-                if (u_val) {
+
+                Value *updated_val = val;
+                optional<unsigned> last_decl_bb;
+                // get the deepest bb that has a decl for dupe of this var
+                // but still ancestor of pred.second
+                for (auto [decl_bb, duped_val] : instr_dupes[val]) {
+                  if (isAncestor(decl_bb, pred.second)) {
+                    if (last_decl_bb && !isAncestor(*last_decl_bb, decl_bb))
+                      continue;
+                    updated_val = duped_val;
+                    last_decl_bb = decl_bb;
+                  }
+                }
+                if (updated_val != val) {
                   auto name = lt.node_data[pred.second].bb->getName();
-                  phi->addValue(**u_val, move(name));
+                  phi->addValue(*updated_val, move(name));
                 }
               }
             } else {
