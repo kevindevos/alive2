@@ -1487,6 +1487,7 @@ void Transform::preprocess(unsigned unroll_factor) {
           auto &target_data = lt.node_data[target];
           unordered_set<Value*> seen_uses;
 
+          vector<unique_ptr<Phi>> to_insert;
           if (became_merge) { // check for new phi instrs only when became merge
             for (auto &instr : target_data.bb->instrs()) {
               for (auto use : instr.operands()) {
@@ -1518,8 +1519,8 @@ void Transform::preprocess(unsigned unroll_factor) {
                                                   use->getName() + sfx + "phi");
                       use_dupes.emplace(++I, target, &(*phi));
                       phi_use[&(*phi)] = use;
-                      target_data.bb->addInstrFront(move(phi));
                       added_phi = true;
+                      to_insert.push_back(move(phi));
                       break;
                     }
                     ++i;
@@ -1530,6 +1531,9 @@ void Transform::preprocess(unsigned unroll_factor) {
               }
             }
           }
+
+          for (auto &phi : to_insert)
+            target_data.bb->addInstrFront(move(phi));
 
           // helper func to get latest Value* 'val' in merge for its pred 'pred'
           function<optional<Value*>(unsigned, Value*)> get_updated_val_for_pred;
