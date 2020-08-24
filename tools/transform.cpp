@@ -1562,23 +1562,20 @@ void Transform::preprocess(unsigned unroll_factor) {
 
               // remove entries that are no longer predecessors
               unordered_set<unsigned> preds;
-              unordered_map<unsigned, pair<Value*, bool>> seen_entries;
+              unordered_map<unsigned, Value*> seen_entries;
               for (auto pred : target_data.preds)
                 preds.insert(pred.second);
               for (auto &[val, bb_name] : phi->getValues()) {
                 auto pred = lt.bb_map[&fn->getBB(bb_name)];
-                auto &seen_entry = seen_entries[pred];
-                seen_entry.first = val;
-                if (preds.find(pred) == preds.end()) {
+                seen_entries[pred] = val;
+                if (preds.find(pred) == preds.end())
                   phi->removeValue(bb_name);
-                  seen_entry.second = true;
-                }
               }
 
               // add entries
               for (auto &pred : target_data.preds) {
                 auto original_pred = unroll_data[pred.second].first_original;
-                auto [val, removed] = seen_entries[original_pred];
+                auto val = seen_entries[original_pred];
 
                 Value *updated_val = val;
                 optional<unsigned> last_decl_bb;
