@@ -1113,6 +1113,7 @@ void Transform::preprocess(unsigned unroll_factor) {
     bool pre_duped = false;
     // instructions that were duplicated given original and new in this bb
     vector<pair<Value*, Value*>> dupes;
+    unsigned num_preds_changed_to_sink;
     // suffix for bb name
     string suffix;
   };
@@ -1284,15 +1285,23 @@ void Transform::preprocess(unsigned unroll_factor) {
           if (as_back && !sink)
             sink = &fn->getBB("#sink");
           auto dst_ = as_back ? *sink : lt.node_data[dst].bb;
-
-          // keep edge for checking phi entries
-          auto &dst_data = lt.node_data[dst];
-          if (dst_ != *sink && dst_data.preds.size() > 0)
-            merge_in_edges.emplace_back(src, dst, dst_data.preds.size() == 1);
-
           instr->addTarget(cond, *dst_);
           lt.node_data[dst].preds.emplace_back(cond, src);
           lt.node_data[src].succs.emplace(dst, make_pair(cond, as_back));
+        }
+
+        // keep edge for checking phi entries
+        if (!replace || replaced) {
+          auto &num_preds_sink = unroll_data[dst].num_preds_changed_to_sink;
+          if (as_back)
+            ++num_preds_sink;
+          auto non_sink_preds = lt.node_data[dst].preds.size() - num_preds_sink;
+          auto &dst_d = lt.node_data[dst];
+          if (!as_back) {
+            auto &fi = dst_d.bb->front();
+            if (non_sink_preds > 1 || dynamic_cast<Phi*>(&fi))
+              merge_in_edges.emplace_back(src, dst, non_sink_preds == 2);
+          }
         }
       };
 
