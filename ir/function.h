@@ -46,6 +46,8 @@ public:
   }
   Instr& back() { return *m_instrs.back(); }
   const Instr& back() const { return *m_instrs.back(); }
+  Instr& front() { return *m_instrs.front(); }
+  const Instr& front() const { return *m_instrs.front(); }
 
   bool empty() const { return m_instrs.empty(); }
 

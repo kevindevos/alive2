@@ -1276,8 +1276,7 @@ void Transform::preprocess(unsigned unroll_factor) {
                 break;
               }
             }
-            for (auto &[c, pred] : lt.node_data[dst].preds)
-              if (c == cond) pred = src;
+            lt.node_data[dst].preds.emplace_back(cond, src);
           }
         }
 
@@ -1571,6 +1570,16 @@ void Transform::preprocess(unsigned unroll_factor) {
               if (dynamic_cast<Constant*>(use))
                   continue;
               unordered_set<unsigned> seen_entries;
+
+              // remove entries that are no longer predecessors
+              unordered_set<unsigned> preds;
+              for (auto pred : target_data.preds)
+                preds.insert(unroll_data[pred.second].first_original);
+              for (auto &[val, bb_name] : phi->getValues()) {
+                auto pred = lt.bb_map[&fn->getBB(bb_name)];
+                if (preds.find(unroll_data[pred].first_original) == preds.end())
+                  phi->removeValue(bb_name);
+              }
 
               // update existing entries
               for (auto &[val, bb_name] : phi->getValues()) {
