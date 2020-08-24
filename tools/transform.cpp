@@ -1556,7 +1556,7 @@ void Transform::preprocess(unsigned unroll_factor) {
             auto &dupes = instr_dupes[use];
             for (auto I = dupes.begin(), E = dupes.end(); I != E; ++I) {
               auto id = I->first;
-              if (!isAncestor(id, pred)) {
+              if (!isAncestor(id, pred) && I != dupes.begin()) {
                 val = (--I)->second;
                 break;
               }
@@ -1569,37 +1569,34 @@ void Transform::preprocess(unsigned unroll_factor) {
             if (auto phi = dynamic_cast<Phi*>(const_cast<Instr*>(&instr))) {
               auto no_entries = phi->operands().empty();
               auto use = no_entries ? phi_use[phi] : phi->operands().front();
+              // TODO does it make sense to test first phi op as constant only?
               if (dynamic_cast<Constant*>(use))
                   continue;
-              unordered_set<unsigned> seen_entries;
 
               // remove entries that are no longer predecessors
+              // n: you do want to remove without first_original, and then add new
               unordered_set<unsigned> preds;
+              unordered_map<unsigned, pair<Value*, bool>> seen_entries;
               for (auto pred : target_data.preds)
-                preds.insert(unroll_data[pred.second].first_original);
+                preds.insert(pred.second);
               for (auto &[val, bb_name] : phi->getValues()) {
                 auto pred = lt.bb_map[&fn->getBB(bb_name)];
-                if (preds.find(unroll_data[pred].first_original) == preds.end())
+                auto &seen_entry = seen_entries[pred];
+                seen_entry.first = val;
+                if (preds.find(pred) == preds.end()) {
                   phi->removeValue(bb_name);
+                  seen_entry.second = true;
+                }
               }
 
-              // update existing entries
-              for (auto &[val, bb_name] : phi->getValues()) {
-                auto pred = lt.bb_map[&fn->getBB(bb_name)];
-                seen_entries.insert(pred);
-                auto updated_val = get_updated_val_for_pred(pred, use);
-                if (updated_val)
-                  phi->rauw(*val, **updated_val);
-              }
-
-              // add new entries missing for some preds
+              // add entries
               for (auto &pred : target_data.preds) {
-                if (seen_entries.find(pred.second) != seen_entries.end())
-                  continue;
-                auto updated_val = get_updated_val_for_pred(pred.second, use);
-                if (updated_val) {
+                auto original_pred = unroll_data[pred.second].first_original;
+                auto [val, removed] = seen_entries[original_pred];
+                auto u_val = get_updated_val_for_pred(pred.second, val);
+                if (u_val) {
                   auto name = lt.node_data[pred.second].bb->getName();
-                  phi->addValue(**updated_val, move(name));
+                  phi->addValue(**u_val, move(name));
                 }
               }
             } else {
