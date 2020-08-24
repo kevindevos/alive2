@@ -1261,11 +1261,6 @@ void Transform::preprocess(unsigned unroll_factor) {
         auto instr = (JumpInstr*) &src_data.bb->back();
         bool replaced = false;
 
-        // keep edge for checking phi entries
-        auto &dst_data = lt.node_data[dst];
-        if (dst_data.preds.size() > 0)
-          merge_in_edges.emplace_back(src, dst, dst_data.preds.size() == 1);
-
         if (replace) {
           replaced = instr->replaceTarget(cond, *lt.node_data[dst].bb);
           if (replaced) {
@@ -1288,6 +1283,12 @@ void Transform::preprocess(unsigned unroll_factor) {
           if (as_back && !sink)
             sink = &fn->getBB("#sink");
           auto dst_ = as_back ? *sink : lt.node_data[dst].bb;
+
+          // keep edge for checking phi entries
+          auto &dst_data = lt.node_data[dst];
+          if (dst_ != *sink && dst_data.preds.size() > 0)
+            merge_in_edges.emplace_back(src, dst, dst_data.preds.size() == 1);
+
           instr->addTarget(cond, *dst_);
           lt.node_data[dst].preds.emplace_back(cond, src);
           lt.node_data[src].succs.emplace(dst, make_pair(cond, as_back));
