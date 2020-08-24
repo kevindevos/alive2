@@ -1183,6 +1183,7 @@ void Transform::preprocess(unsigned unroll_factor) {
         auto ins_bb = fn->addBB(move(*newbb));
 
         auto id = lt.node_data.size();
+        lt.bb_map[ins_bb] = id;
 
         // manually dupe instrs and update instr_dupes and unroll_data.dupes
         for (auto &i : bb_first_orig->instrs()) {
