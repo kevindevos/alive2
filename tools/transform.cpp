@@ -1186,7 +1186,7 @@ void Transform::preprocess(unsigned unroll_factor) {
 
         // manually dupe instrs and update instr_dupes and unroll_data.dupes
         for (auto &i : bb_first_orig->instrs()) {
-          ins_bb->addInstr(i.dup(suffix));
+          ins_bb->addInstr(move(i.dup(suffix)));
           auto i_val = (Value*) &i;
           instr_dupes[i_val].emplace_back(id, &ins_bb->back());
           unroll_data[id].dupes.emplace_back(i_val, &ins_bb->back());
@@ -1464,8 +1464,6 @@ void Transform::preprocess(unsigned unroll_factor) {
         bbs.clear();
         for (auto I = sorted.rbegin(), E = sorted.rend(); I != E; ++I)
           bbs.emplace_back(lt.node_data[*I].bb);
-        if (sink)
-          bbs.emplace_back(*sink);
 
         // check if a_id is ancestor of b_id
         // credit to paper & authors:
@@ -1626,6 +1624,8 @@ void Transform::preprocess(unsigned unroll_factor) {
         ofstream f3("src_unrolled.dot");
         cfg_.printDot(f3);
       }
+      if (sink)
+        fn->getBBs().emplace_back(*sink);
     }
   }
 }
