@@ -1518,10 +1518,11 @@ void Transform::preprocess(unsigned unroll_factor) {
                       auto &sfx = unroll_data[target].suffix;
                       auto phi = make_unique<Phi>(use->getType(),
                                                   use->getName() + sfx + "phi");
-                      use_dupes.emplace(++I, target, &(*phi));
-                      phi_use[&(*phi)] = use;
-                      added_phi = true;
                       to_insert.push_back(move(phi));
+                      auto &phi_ = to_insert.back();
+                      use_dupes.emplace(++I, target, &(*phi_));
+                      phi_use[&(*phi_)] = use;
+                      added_phi = true;
                       break;
                     }
                     ++i;
