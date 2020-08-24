@@ -1630,8 +1630,6 @@ void Transform::preprocess(unsigned unroll_factor) {
         ofstream f3("src_unrolled.dot");
         cfg_.printDot(f3);
       }
-      if (sink)
-        fn->getBBs().emplace_back(*sink);
     }
   }
 }
