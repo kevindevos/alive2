@@ -1186,10 +1186,10 @@ void Transform::preprocess(unsigned unroll_factor) {
 
         // manually dupe instrs and update instr_dupes and unroll_data.dupes
         for (auto &i : bb_first_orig->instrs()) {
-          newbb->addInstr(i.dup(suffix));
+          ins_bb->addInstr(i.dup(suffix));
           auto i_val = (Value*) &i;
-          instr_dupes[i_val].emplace_back(id, &newbb->back());
-          unroll_data[id].dupes.emplace_back(i_val, &newbb->back());
+          instr_dupes[i_val].emplace_back(id, &ins_bb->back());
+          unroll_data[id].dupes.emplace_back(i_val, &ins_bb->back());
         }
         unroll_data[id].suffix = move(suffix);
 
