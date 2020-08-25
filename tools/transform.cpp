@@ -1112,7 +1112,7 @@ void Transform::preprocess(unsigned unroll_factor) {
     optional<unsigned> prev_loop_dupe;
     bool pre_duped = false;
     // instructions that were duplicated given original and new in this bb
-    vector<pair<Value*, Value*>> dupes;
+    list<pair<Value*, Value*>> dupes;
     unsigned num_preds_changed_to_sink;
     // suffix for bb name
     string suffix;
@@ -1530,6 +1530,7 @@ void Transform::preprocess(unsigned unroll_factor) {
                                                   sfx + "_phi");
                       auto &phi_ = to_insert.emplace_back(move(phi));
                       use_dupes.emplace(++I, target, &(*phi_));
+                      unroll_data[target].dupes.emplace_front(use, &(*phi_));
                       phi_use[&(*phi_)] = use;
                       goto next_use;
                     }
