@@ -1563,6 +1563,14 @@ next_use:;
                 // for created phis grab val from phi_use
                 auto val = entries.empty() ? phi_use[phi] : entries[orig_pred];
 
+                // if value for orig_pred entry is constant, add new entry for
+                // new bb with that constant
+                if (dynamic_cast<Constant*>(val)) {
+                  auto name = lt.node_data[pred.second].bb->getName();
+                  phi->addValue(*val, move(name));
+                  continue;
+                }
+
                 Value *updated_val = val;
                 optional<unsigned> last_decl_bb;
                 // get the deepest bb that has a decl for dupe of this var
