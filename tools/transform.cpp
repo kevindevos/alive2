@@ -1584,10 +1584,8 @@ next_use:;
                     last_decl_bb = decl_bb;
                   }
                 }
-                if (updated_val != val) {
-                  auto name = lt.node_data[pred.second].bb->getName();
-                  phi->addValue(*updated_val, move(name));
-                }
+                auto name = lt.node_data[pred.second].bb->getName();
+                phi->addValue(*updated_val, move(name));
               }
             } else {
               break;
