@@ -1549,21 +1549,30 @@ next_use:;
             if (auto phi = dynamic_cast<Phi*>(const_cast<Instr*>(&instr))) {
               // remove entries that are no longer predecessors
               unordered_set<unsigned> preds;
-              unordered_map<unsigned, Value*> entries;
+              // bb -> (value, removed)
+              unordered_map<unsigned, pair<Value*, bool>> entries;
               for (auto pred : target_data.preds)
                 preds.insert(pred.second);
               for (auto &[val, bb_name] : phi->getValues()) {
                 auto pred = lt.bb_map[&fn->getBB(bb_name)];
-                entries[pred] = val;
-                if (preds.find(pred) == preds.end())
+                bool removed = false;
+                if (preds.find(pred) == preds.end()) {
                   phi->removeValue(bb_name);
+                  removed = true;
+                }
+                entries.try_emplace(pred, val, removed);
               }
 
               // add entries
               for (auto &pred : target_data.preds) {
                 auto orig_pred = unroll_data[pred.second].first_original;
+                auto I = entries.find(orig_pred);
+                if (I != entries.end())
+                  if (pred.second == orig_pred && !I->second.second)
+                    continue;
+
                 // for created phis grab val from phi_use
-                auto val = entries.empty() ? phi_use[phi] : entries[orig_pred];
+                auto val = entries.empty() ? phi_use[phi] : I->second.first;
 
                 // if value for orig_pred entry is constant, add new entry for
                 // new bb with that constant
