@@ -1600,14 +1600,17 @@ next_use:;
           for (auto &i_dupe : unroll_data[lt.nodes[i]].dupes) {
             auto its = users.equal_range(i_dupe.first);
 
-            for (auto I = its.first, E = its.second; I != E; ++I) {
+            for (auto I = its.first, E = its.second; I != E;) {
               auto instr = (Instr*) I->second;
-              if (dynamic_cast<Phi*>(instr))
+              if (dynamic_cast<Phi*>(instr)) {
+                ++I;
                 continue;
+              }
 
               // if dupe of declaration is ancestor of use then replace
               auto containing_bb = *instr->containingBB();
               int c_bb_id = lt.bb_map[containing_bb];
+              bool erased = false;
               if (isAncestor(lt.nodes[i], c_bb_id)) {
                 // if same bb, verify use comes after declaration
                 auto what = I->first;
@@ -1623,8 +1626,15 @@ next_use:;
                     }
                   }
                 }
-                if (!use_before_decl)
+                if (!use_before_decl) {
                   instr->rauw(*what, *with);
+                  users.erase(I++);
+                  erased = true;
+                }
+              }
+              if (!erased) {
+                ++I;
+                erased = false;
               }
             }
           }
