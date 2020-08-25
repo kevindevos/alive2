@@ -1306,8 +1306,10 @@ void Transform::preprocess(unsigned unroll_factor) {
           auto &dst_d = lt.node_data[dst];
           if (!as_back) {
             auto &fi = dst_d.bb->front();
-            if (non_sink_preds > 1 || dynamic_cast<Phi*>(&fi))
-              merge_in_edges.try_emplace(dst, src, non_sink_preds == 2);
+            bool has_phi = dynamic_cast<Phi*>(&fi);
+            if (non_sink_preds > 1 || has_phi)
+              merge_in_edges.try_emplace(dst, src, non_sink_preds >= 2 &&
+                                                   !has_phi);
           }
         }
       };
