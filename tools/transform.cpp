@@ -1526,7 +1526,8 @@ void Transform::preprocess(unsigned unroll_factor) {
                         !isAncestor(use_dupe_bb_id, first_pred)) {
                       auto &sfx = unroll_data[target].suffix;
                       auto phi = make_unique<Phi>(use->getType(),
-                                                  use->getName() + sfx + "phi");
+                                                  use->getName() +
+                                                  sfx + "_phi");
                       auto &phi_ = to_insert.emplace_back(move(phi));
                       use_dupes.emplace(++I, target, &(*phi_));
                       phi_use[&(*phi_)] = use;
