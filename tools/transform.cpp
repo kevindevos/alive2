@@ -1545,30 +1545,23 @@ next_use:;
           // phi entries
           for (auto &instr : target_data.bb->instrs()) {
             if (auto phi = dynamic_cast<Phi*>(const_cast<Instr*>(&instr))) {
-              auto no_entries = phi->operands().empty();
-              auto use = no_entries ? phi_use[phi] : phi->operands().front();
-
-              // TODO does it make sense to test first phi op as constant only?
-              // should probably check for all ops, and which bbs should i check this for?
-              if (dynamic_cast<Constant*>(use))
-                  continue;
-
               // remove entries that are no longer predecessors
               unordered_set<unsigned> preds;
-              unordered_map<unsigned, Value*> seen_entries;
+              unordered_map<unsigned, Value*> entries;
               for (auto pred : target_data.preds)
                 preds.insert(pred.second);
               for (auto &[val, bb_name] : phi->getValues()) {
                 auto pred = lt.bb_map[&fn->getBB(bb_name)];
-                seen_entries[pred] = val;
+                entries[pred] = val;
                 if (preds.find(pred) == preds.end())
                   phi->removeValue(bb_name);
               }
 
               // add entries
               for (auto &pred : target_data.preds) {
-                auto original_pred = unroll_data[pred.second].first_original;
-                auto val = seen_entries[original_pred];
+                auto orig_pred = unroll_data[pred.second].first_original;
+                // for created phis grab val from phi_use
+                auto val = entries.empty() ? phi_use[phi] : entries[orig_pred];
 
                 Value *updated_val = val;
                 optional<unsigned> last_decl_bb;
