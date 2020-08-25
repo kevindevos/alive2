@@ -1141,7 +1141,7 @@ void Transform::preprocess(unsigned unroll_factor) {
       unordered_map<Value*, list<pair<unsigned, Value*>>> instr_dupes;
 
       // keep edges to merges to check for phis
-      vector<tuple<unsigned, unsigned, bool>> merge_in_edges;
+      unordered_map<unsigned, pair<unsigned, bool>> merge_in_edges;
 
       // Prepare data structure for unroll algorithm
       for (auto node : lt.node_data) {
@@ -1301,7 +1301,7 @@ void Transform::preprocess(unsigned unroll_factor) {
           if (!as_back) {
             auto &fi = dst_d.bb->front();
             if (non_sink_preds > 1 || dynamic_cast<Phi*>(&fi))
-              merge_in_edges.emplace_back(src, dst, non_sink_preds == 2);
+              merge_in_edges.try_emplace(dst, src, non_sink_preds == 2);
           }
         }
       };
@@ -1432,17 +1432,16 @@ void Transform::preprocess(unsigned unroll_factor) {
         }
       }
 
-      // topsort in sort.h but specific to the data structures here + iterative
-      // also build new preorder + last numbering
-      lt.last.clear();
-      lt.number.clear();
-      lt.nodes.clear();
-      lt.last.resize(lt.node_data.size());
-      lt.number.resize(lt.node_data.size());
-      lt.nodes.resize(lt.node_data.size());
-
       unsigned current = 0;
       if (num_duped_bbs > 0) {
+        // topsort in sort.h but specific to the data structures here + iterative
+        // also build new preorder + last numbering
+        lt.last.clear();
+        lt.number.clear();
+        lt.nodes.clear();
+        lt.last.resize(lt.node_data.size());
+        lt.number.resize(lt.node_data.size());
+        lt.nodes.resize(lt.node_data.size());
         vector<unsigned> sorted;
         vector<unsigned> worklist;
         vector<pair<bool, bool>> marked; // <visited, pushed>
@@ -1481,27 +1480,21 @@ void Transform::preprocess(unsigned unroll_factor) {
         // credit to paper & authors:
         // Havlak, Paul (1997). Nesting of Reducible and Irreducible Loops.
         auto isAncestor = [&](unsigned a_id, unsigned b_id) -> bool {
-          auto a_num = lt.number[a_id];
-          auto b_num = lt.number[b_id];
-          return a_num <= b_num && b_num <= lt.last[a_num];
+          return lt.number[a_id] <= lt.number[b_id] &&
+                 lt.number[b_id] <= lt.last[lt.number[a_id]];
         };
 
         // update phi entries and add phi instructions when necessary
-        visited.clear();
-        visited.resize(lt.node_data.size());
         unordered_map<Value*, Value*> phi_use;
 
         // check if necessary to add phi instructions
-        for (auto [pred, target, became_merge] : merge_in_edges) {
-          if (visited[target])
-            continue;
-          visited[target] = true;
-
+        for (auto [target, data] : merge_in_edges) {
           auto &target_data = lt.node_data[target];
           unordered_set<Value*> seen_uses;
-
           vector<unique_ptr<Phi>> to_insert;
-          if (became_merge) { // check for new phi instrs only when became merge
+
+          // check for new phi instrs only when became merge
+          if (data.second) {
             for (auto &instr : target_data.bb->instrs()) {
               for (auto use : instr.operands()) {
                 if (dynamic_cast<Constant*>(use))
@@ -1510,19 +1503,17 @@ void Transform::preprocess(unsigned unroll_factor) {
                 if (seen_uses.find(use) != seen_uses.end())
                   continue;
                 seen_uses.insert(use);
-                auto first_pred = target_data.preds.front().second;
 
                 // check for each pred if use was duped on path to pred
+                auto first_pred = target_data.preds.front().second;
                 for (auto pred : target_data.preds) {
                   if (pred.second == first_pred)
                     continue;
 
-                  auto &use_dupes = instr_dupes[use];
                   unsigned i = 0;
-                  bool added_phi = false;
-
+                  auto &use_dupes = instr_dupes[use];
                   for (auto I = use_dupes.begin(), E = use_dupes.end(); I != E;
-                       ++I) {
+                       ++I, ++i) {
                     auto [use_dupe_bb_id, val] = *I;
 
                     if (isAncestor(use_dupe_bb_id, pred.second) &&
@@ -1530,18 +1521,14 @@ void Transform::preprocess(unsigned unroll_factor) {
                       auto &sfx = unroll_data[target].suffix;
                       auto phi = make_unique<Phi>(use->getType(),
                                                   use->getName() + sfx + "phi");
-                      to_insert.push_back(move(phi));
-                      auto &phi_ = to_insert.back();
+                      auto &phi_ = to_insert.emplace_back(move(phi));
                       use_dupes.emplace(++I, target, &(*phi_));
                       phi_use[&(*phi_)] = use;
-                      added_phi = true;
-                      break;
+                      goto next_use;
                     }
-                    ++i;
                   }
-                  if (added_phi)
-                    break;
                 }
+next_use:;
               }
             }
           }
