@@ -1094,6 +1094,7 @@ void Transform::preprocess(unsigned unroll_factor) {
   }
 
   auto k = unroll_factor;
+  k = 2;
 
   // DEBUG
   auto loops_so_far = 0;
@@ -1116,6 +1117,8 @@ void Transform::preprocess(unsigned unroll_factor) {
     unsigned num_preds_changed_to_sink;
     // suffix for bb name
     string suffix;
+    // idx of node in topologically sorted bbs
+    unsigned top_order_idx;
   };
 
   if (k > 0) {
@@ -1488,6 +1491,7 @@ void Transform::preprocess(unsigned unroll_factor) {
           } else {
             if (!pushed) {
               lt.last[lt.number[cur]] = current - 1;
+              unroll_data[cur].top_order_idx = sorted.size();
               sorted.emplace_back(cur);
               pushed = true;
             }
@@ -1510,66 +1514,82 @@ void Transform::preprocess(unsigned unroll_factor) {
 
         // update phi entries and add phi instructions when necessary
         unordered_map<Value*, Value*> phi_use;
+        auto users = fn->getUsers();
 
         // check if necessary to add phi instructions
-        for (auto [target, data] : merge_in_edges) {
-          auto &target_data = lt.node_data[target];
+        for (auto [merge, data] : merge_in_edges) {
+          auto &merge_data = lt.node_data[merge];
           unordered_set<Value*> seen_uses;
           vector<unique_ptr<Phi>> to_insert;
 
-          // check for new phi instrs only when became merge
           if (data.second) {
-            for (auto &instr : target_data.bb->instrs()) {
-              for (auto use : instr.operands()) {
-                if (dynamic_cast<Constant*>(use))
+            // get range of preds in topological order
+            unsigned first = 0;
+            unsigned last = 0;
+            unsigned max = 0;
+            auto min = bbs.size();
+            for (auto pred : merge_data.preds) {
+              auto top_order = unroll_data[pred.second].top_order_idx;
+              if (top_order < min) {
+                min = top_order;
+                first = pred.second;
+              }
+              if (top_order >= max) {
+                max = top_order;
+                last = pred.second;
+              }
+            }
+
+            // add phi's to merge for uses that have different values between
+            // preds
+            unordered_set<Value*> seen_uses;
+            for (auto bb = sorted[first], end = sorted[last]; bb != end; ++bb) {
+              if (!isAncestor(first, bb) || !isAncestor(bb, last))
+                continue;
+              for (auto dupe : unroll_data[bb].dupes) {
+                auto val = dupe.first;
+                if (!seen_uses.insert(val).second)
                   continue;
-                // avoid checking same use twice
-                if (seen_uses.find(use) != seen_uses.end())
-                  continue;
-                seen_uses.insert(use);
+                auto uses = users.equal_range(val); // uses for original
 
-                // check for each pred if use was duped on path to pred
-                auto first_pred = target_data.preds.front().second;
-                for (auto pred : target_data.preds) {
-                  if (pred.second == first_pred)
-                    continue;
-
-                  unsigned i = 0;
-                  auto &use_dupes = instr_dupes[use];
-                  for (auto I = use_dupes.begin(), E = use_dupes.end(); I != E;
-                       ++I, ++i) {
-                    auto [use_dupe_bb_id, val] = *I;
-
-                    if (isAncestor(use_dupe_bb_id, pred.second) &&
-                        !isAncestor(use_dupe_bb_id, first_pred)) {
-                      auto &sfx = unroll_data[target].suffix;
-                      auto phi = make_unique<Phi>(val->getType(),
-                                                  val->getName() +
-                                                  sfx + "_phi");
-                      auto &phi_ = to_insert.emplace_back(move(phi));
-                      use_dupes.emplace(++I, target, &(*phi_));
-                      unroll_data[target].dupes.emplace_front(use, &(*phi_));
-                      phi_use[&(*phi_)] = use;
-                      goto next_use;
+                for (auto I = uses.first, E = uses.second; I != E; ++I) {
+                  auto cbbid = lt.bb_map[*((Instr*) I->second)->containingBB()];
+                  // If there is a use after the merge for the duped var then
+                  // add phi in merge
+                  if (isAncestor(merge, cbbid)) {
+                    auto &sfx = unroll_data[merge].suffix;
+                    auto phi = make_unique<Phi>(val->getType(),
+                                                I->first->getName() + sfx +
+                                                "_phi");
+                    auto &phi_ = to_insert.emplace_back(move(phi));
+                    unroll_data[merge].dupes.emplace_front(val, &(*phi_));
+                    phi_use[&(*phi_)] = val;
+                    auto &dupes = instr_dupes[val];
+                    for (auto II = dupes.begin(), EE = dupes.end(); II != EE;
+                         ++II) {
+                      if (isAncestor(merge, II->first)) {
+                        dupes.emplace(II, merge, &(*phi_));
+                        break;
+                      }
                     }
+                    break;
                   }
                 }
-next_use:;
               }
             }
           }
 
           for (auto &phi : to_insert)
-            target_data.bb->addInstrFront(move(phi));
+            merge_data.bb->addInstrFront(move(phi));
 
           // phi entries
-          for (auto &instr : target_data.bb->instrs()) {
+          for (auto &instr : merge_data.bb->instrs()) {
             if (auto phi = dynamic_cast<Phi*>(const_cast<Instr*>(&instr))) {
               // remove entries that are no longer predecessors
               unordered_set<unsigned> preds;
               // bb -> (value, removed)
               unordered_map<unsigned, pair<Value*, bool>> entries;
-              for (auto pred : target_data.preds)
+              for (auto pred : merge_data.preds)
                 preds.insert(pred.second);
               for (auto &[val, bb_name] : phi->getValues()) {
                 auto pred = lt.bb_map[&fn->getBB(bb_name)];
@@ -1582,7 +1602,7 @@ next_use:;
               }
 
               // add entries
-              for (auto &pred : target_data.preds) {
+              for (auto &pred : merge_data.preds) {
                 auto orig_pred = unroll_data[pred.second].first_original;
                 auto I = entries.find(orig_pred);
                 if (I != entries.end())
@@ -1622,7 +1642,6 @@ next_use:;
         }
 
         // update instruction operands by traversing bb's in reverse preorder
-        auto users = fn->getUsers();
         for (int i = lt.nodes.size() - 1; i > -1; --i) {
           for (auto &i_dupe : unroll_data[lt.nodes[i]].dupes) {
             auto its = users.equal_range(i_dupe.first);
