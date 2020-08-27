@@ -1096,10 +1096,6 @@ void Transform::preprocess(unsigned unroll_factor) {
   auto k = unroll_factor;
   k = 2;
 
-  // DEBUG
-  auto loops_so_far = 0;
-  auto max_loops = -1;
-
   struct UnrollNodeData {
     unsigned id;
     // the bb from which id was duped
@@ -1117,8 +1113,6 @@ void Transform::preprocess(unsigned unroll_factor) {
     unsigned num_preds_changed_to_sink;
     // suffix for bb name
     string suffix;
-    // idx of node in topologically sorted bbs
-    unsigned top_order_idx;
   };
 
   if (k > 0) {
@@ -1140,12 +1134,12 @@ void Transform::preprocess(unsigned unroll_factor) {
       unsigned num_duped_bbs = 0;
       optional<BasicBlock*> sink;
 
-      auto num_original_bbs = lt.node_data.size();
+      // auto num_original_bbs = lt.node_data.size();
 
       // keep track of edges that were replaced with replaceTarget
       // for a edge case in back-edge testing
-      vector<vector<unsigned>> replaced_edges;
-      replaced_edges.resize(num_original_bbs);
+      // vector<vector<unsigned>> replaced_edges;
+      // replaced_edges.resize(num_original_bbs);
 
       // all dupes and the bb_id they were created for a given instr
       unordered_map<Value*, list<pair<unsigned, Value*>>> instr_dupes;
@@ -1176,7 +1170,7 @@ void Transform::preprocess(unsigned unroll_factor) {
         return *unroll_data[unroll_data[bb].original].last_dupe;
       };
 
-      auto dupe_bb = [&](unsigned bb, unsigned header) -> unsigned {
+      auto dupe_bb = [&](unsigned bb, unsigned loop) -> unsigned {
         lt.node_data.reserve(lt.node_data.size()+1);
         auto &bb_data = lt.node_data[bb];
         bb_data.id = bb;
@@ -1240,7 +1234,7 @@ void Transform::preprocess(unsigned unroll_factor) {
         u_ins_data.first_original = u_bb_data.first_original;
 
         // add duped bbs straight into the containing loop's body if it exists
-        auto &fh = lt.node_data[header].first_header;
+        auto &fh = lt.node_data[loop].first_header;
         if (fh) {
           auto h_data = &lt.node_data[*fh];
           while (h_data->id != lt.ROOT_ID) {
@@ -1253,12 +1247,12 @@ void Transform::preprocess(unsigned unroll_factor) {
         return id;
       };
 
-      auto in_loop = [&](unsigned bb, unsigned loop_header) -> bool {
-        if (bb == loop_header) return true;
+      auto in_loop = [&](unsigned bb, unsigned loop) -> bool {
+        if (bb == loop) return true;
         auto bb_header = *lt.node_data[bb].first_header;
 
         while (bb_header) {
-          if (bb_header != loop_header)
+          if (bb_header != loop)
             bb_header = *lt.node_data[bb_header].first_header;
           else
             return true;
@@ -1273,10 +1267,10 @@ void Transform::preprocess(unsigned unroll_factor) {
         auto I = src_succs.find(dst);
         if (I != src_succs.end())
           ret = I->second.second;
-        else if (src == unroll_data[src].first_original)
-          for (auto dst_ : replaced_edges[src])
-            if (dst_ == dst)
-              ret = true;
+        // else if (src == unroll_data[src].first_original)
+        //   for (auto dst_ : replaced_edges[src])
+        //     if (dst_ == dst)
+        //       ret = true;
         return ret;
       };
 
@@ -1293,7 +1287,7 @@ void Transform::preprocess(unsigned unroll_factor) {
             for (auto &[succ, data] : succs) {
               if (data.first == cond) {
                 data.second = as_back;
-                replaced_edges[src].emplace_back(succ);
+                // replaced_edges[src].emplace_back(succ);
                 auto node_handler = lt.node_data[src].succs.extract(succ);
                 node_handler.key() = dst;
                 lt.node_data[src].succs.insert(move(node_handler));
@@ -1332,31 +1326,23 @@ void Transform::preprocess(unsigned unroll_factor) {
         }
       };
 
-      auto duplicate_header = [&](unsigned header, unsigned n, bool last_it)
+      auto duplicate_header = [&](unsigned loop, bool last_it)
                                   -> optional<unsigned> {
         optional<unsigned> duped_header;
 
         // return empty if duped header will have no outgoing edges
         if (last_it) {
           bool edge_will_be_added = false;
-          for (auto &[dst, data] : lt.node_data[header].succs)
-            if (!in_loop(dst, header))
+          for (auto &[dst, data] : lt.node_data[loop].succs)
+            if (!in_loop(dst, loop))
               edge_will_be_added = true;
           if (!edge_will_be_added)
             return duped_header;
         }
 
-        duped_header = dupe_bb(header, n);
+        duped_header = dupe_bb(loop, loop);
         auto &duped_header_data = lt.node_data[*duped_header];
         ((JumpInstr*) &duped_header_data.bb->back())->clearTargets();
-
-        if (last_it) {
-          // back-edges as edges to #sink
-          for (auto &[dst, data] : lt.node_data[header].succs) {
-            if (in_loop(dst, header))
-              add_edge(data.first, *duped_header, last_dupe(dst), false, true);
-          }
-        }
 
         return duped_header;
       };
@@ -1386,8 +1372,6 @@ void Transform::preprocess(unsigned unroll_factor) {
             S.push(child_loop);
         } else {
           cur_loop = n;
-          if ((int) loops_so_far == max_loops) continue;
-          ++loops_so_far;
 
           // ignore loops not marked reducible or irreducible
           auto n_type = lt.node_data[n].type;
@@ -1409,7 +1393,7 @@ void Transform::preprocess(unsigned unroll_factor) {
             loops.pop();
             unroll_data[loop].pre_duped = true;
 
-            auto hdr = duplicate_header(loop, loop, k == 1);
+            auto hdr = duplicate_header(loop, k == 1);
             if (!hdr)
               break;
 
@@ -1428,7 +1412,8 @@ void Transform::preprocess(unsigned unroll_factor) {
           for (unsigned i = 1; i < k; ++i) {
             // create BB copies of the loop body and header
             duplicate_body();
-            auto n_ = duplicate_header(n, n, i == k - 1);
+            bool last_it = i == k - 1;
+            auto n_ = duplicate_header(n, last_it);
 
             // dupe body edges
             auto &loop = lt.loop_data[n].nodes;
@@ -1439,7 +1424,7 @@ void Transform::preprocess(unsigned unroll_factor) {
                 auto dst_original = unroll_data[dst].original;
                 bool dst_in_loop = in_loop(dst_original, cur_loop);
                 auto dst_ = dst_in_loop ? last_dupe(dst) : dst;
-                bool back_edge = is_back_edge(bb, dst_original);
+                bool back_edge = is_back_edge(bb, dst);
                 add_edge(data.first, last_dupe(bb), dst_, back_edge, back_edge);
               }
             }
@@ -1453,6 +1438,15 @@ void Transform::preprocess(unsigned unroll_factor) {
                   add_edge(data.first, *n_, dst, false, false);
 
             }
+
+            if (last_it) {
+              // back-edges as edges to #sink
+              for (auto &[dst, data] : lt.node_data[*n_].succs) {
+                if (in_loop(dst, *n_))
+                  add_edge(data.first, *n_, last_dupe(dst), false, true);
+              }
+            }
+
             n_prev = *n_;
           }
           prev_loop = cur_loop;
@@ -1472,6 +1466,8 @@ void Transform::preprocess(unsigned unroll_factor) {
         vector<unsigned> sorted;
         vector<unsigned> worklist;
         vector<pair<bool, bool>> marked; // <visited, pushed>
+        vector<unsigned> top_order_idx;
+        top_order_idx.resize(lt.node_data.size());
         marked.resize(lt.node_data.size());
         worklist.push_back(lt.ROOT_ID);
 
@@ -1491,7 +1487,7 @@ void Transform::preprocess(unsigned unroll_factor) {
           } else {
             if (!pushed) {
               lt.last[lt.number[cur]] = current - 1;
-              unroll_data[cur].top_order_idx = sorted.size();
+              top_order_idx[cur] = sorted.size();
               sorted.emplace_back(cur);
               pushed = true;
             }
@@ -1529,7 +1525,7 @@ void Transform::preprocess(unsigned unroll_factor) {
             unsigned max = 0;
             auto min = bbs.size();
             for (auto pred : merge_data.preds) {
-              auto top_order = unroll_data[pred.second].top_order_idx;
+              auto top_order = top_order_idx[pred.second];
               if (top_order < min) {
                 min = top_order;
                 first = pred.second;
