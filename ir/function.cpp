@@ -421,7 +421,9 @@ void LoopTree::buildLoopTree() {
       auto &t_data = node_data[t_n];
       t_data.id = t_n;
       t_data.preds.emplace_back(c, pred);
-      node_data[pred].succs.emplace(t_n, std::make_pair(c, b_visited));
+      // set back-edge flag to false for now, update later with DFS and
+      // isAncestor
+      node_data[pred].succs.emplace(t_n, std::make_pair(c, false));
     };
 
     while (!dfs_work_list.empty()) {
@@ -585,6 +587,24 @@ void LoopTree::buildLoopTree() {
     }
     if (!w_num)
       break;
+  }
+
+  // Set back-edge flag correctly for edges through DFS with isAncestor
+  visited.clear();
+  visited.resize(node_data.size());
+  work_list.push(ROOT_ID);
+
+  while(!work_list.empty()) {
+    auto cur = work_list.top();
+    work_list.pop();
+
+    if (!visited[cur]) {
+      visited[cur] = true;
+      for (auto succ : node_data[cur].succs) {
+        work_list.push(succ.first);
+        succ.second.second = isAncestor(number[succ.first], number[cur]);
+      }
+    }
   }
 
   // build child loops relationship for the root node
