@@ -1275,7 +1275,7 @@ void Transform::preprocess(unsigned unroll_factor) {
       };
 
       auto add_edge = [&](Value *cond, unsigned src, unsigned dst, bool replace,
-                          bool as_back) {
+                          bool to_sink) {
         auto &src_data = lt.node_data[src];
         auto &dst_data = lt.node_data[dst];
         auto instr = (JumpInstr*) &src_data.bb->back();
@@ -1286,11 +1286,11 @@ void Transform::preprocess(unsigned unroll_factor) {
           auto &succs = lt.node_data[src].succs;
           for (auto &[succ, data] : succs) {
             if (data.first == cond) {
-              data.second = as_back;
+              data.second = to_sink;
               // replaced_edges[src].emplace_back(succ);
               auto node_handler = succs.extract(succ);
               node_handler.key() = dst;
-              node_handler.mapped().second = as_back;
+              node_handler.mapped().second = to_sink;
               succs.insert(move(node_handler));
               // TODO erase src from old_succ.preds without iterator
               // invalidation
@@ -1300,22 +1300,22 @@ void Transform::preprocess(unsigned unroll_factor) {
         }
 
         auto &num_preds_sink = unroll_data[dst].num_preds_changed_to_sink;
-        if (as_back) {
+        if (to_sink) {
           ++num_preds_sink;
           if (!sink)
             sink = &fn->getBB("#sink");
         }
 
         if (!replace) {
-          auto dst_ = as_back ? *sink : dst_data.bb;
+          auto dst_ = to_sink ? *sink : dst_data.bb;
           instr->addTarget(cond, *dst_);
           dst_data.preds.emplace_back(cond, src);
-          lt.node_data[src].succs.emplace(dst, make_pair(cond, as_back));
+          lt.node_data[src].succs.emplace(dst, make_pair(cond, to_sink));
         }
 
         // keep edge for checking phi entries
         auto non_sink_preds = dst_data.preds.size() - num_preds_sink;
-        if (!as_back) {
+        if (!to_sink) {
           bool has_phi = dynamic_cast<Phi*>(&dst_data.bb->front());
           if (non_sink_preds > 1 || has_phi)
             merge_in_edges.try_emplace(dst, src, non_sink_preds >= 2 &&
