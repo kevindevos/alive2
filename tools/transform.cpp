@@ -1397,7 +1397,7 @@ void Transform::preprocess(unsigned unroll_factor) {
 
             for (auto &[c, pred] : lt.node_data[loop].preds) {
               if (in_loop(pred, loop))
-                add_edge(c, pred, *n_, is_back_edge(pred, loop), false);
+                add_edge(c, pred, *n_, true, false);
             }
 
             for (auto &[dst, data] : lt.node_data[loop].succs) {
