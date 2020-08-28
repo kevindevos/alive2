@@ -1446,7 +1446,7 @@ void Transform::preprocess(unsigned unroll_factor) {
                 bool dst_in_loop = in_loop(dst_original, cur_loop);
                 auto dst_ = dst_in_loop ? last_dupe(dst) : dst;
                 bool back_edge = is_back_edge(bb, dst);
-                add_edge(data.first, last_dupe(bb), dst_, back_edge, back_edge);
+                add_edge(data.first, last_dupe(bb), dst_, false, back_edge);
               }
             }
             n_prev = *n_;
