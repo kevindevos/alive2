@@ -1279,26 +1279,23 @@ void Transform::preprocess(unsigned unroll_factor) {
         auto &src_data = lt.node_data[src];
         auto &dst_data = lt.node_data[dst];
         auto instr = (JumpInstr*) &src_data.bb->back();
-        bool replaced = false;
 
         if (replace) {
-          replaced = instr->replaceTarget(cond, *lt.node_data[dst].bb);
-          if (replaced) {
-            auto &succs = lt.node_data[src].succs;
-            for (auto &[succ, data] : succs) {
-              if (data.first == cond) {
-                data.second = as_back;
-                // replaced_edges[src].emplace_back(succ);
-                auto node_handler = succs.extract(succ);
-                node_handler.key() = dst;
-                node_handler.mapped().second = as_back;
-                succs.insert(move(node_handler));
-                // TODO erase src from old_succ.preds without iterator
-                // invalidation
-                break;
-              }
+          instr->replaceTarget(cond, *dst_data.bb);
+          lt.node_data[dst].preds.emplace_back(cond, src);
+          auto &succs = lt.node_data[src].succs;
+          for (auto &[succ, data] : succs) {
+            if (data.first == cond) {
+              data.second = as_back;
+              // replaced_edges[src].emplace_back(succ);
+              auto node_handler = succs.extract(succ);
+              node_handler.key() = dst;
+              node_handler.mapped().second = as_back;
+              succs.insert(move(node_handler));
+              // TODO erase src from old_succ.preds without iterator
+              // invalidation
+              break;
             }
-            lt.node_data[dst].preds.emplace_back(cond, src);
           }
         }
 
@@ -1309,7 +1306,7 @@ void Transform::preprocess(unsigned unroll_factor) {
             sink = &fn->getBB("#sink");
         }
 
-        if (!replaced) {
+        if (!replace) {
           auto dst_ = as_back ? *sink : dst_data.bb;
           instr->addTarget(cond, *dst_);
           dst_data.preds.emplace_back(cond, src);

@@ -1937,34 +1937,25 @@ void JumpInstr::addTarget(Value *val, BasicBlock &target) {
   }
 }
 
-bool JumpInstr::replaceTarget(Value *cond, BasicBlock &new_dst) {
-  bool replaced = false;
+void JumpInstr::replaceTarget(Value *cond, BasicBlock &new_dst) {
   if (auto br = dynamic_cast<Branch*>(this)) {
-    if (cond == br->getCond() && br->getTrue() != nullptr) {
-      replaced = true;
+    if (cond == br->getCond() && br->getTrue() != nullptr)
       br->setTrue(br->getCond(), new_dst);
-    } else if (cond == nullptr && br->getTrue() != &new_dst &&
-               br->getFalse() != nullptr) {
-      replaced = true;
+    else if (cond == nullptr && br->getTrue() != &new_dst &&
+               br->getFalse() != nullptr)
       br->setFalse(new_dst);
-    }
   } else if (auto sw = dynamic_cast<Switch*>(this)) {
     // replace for both default and targets if duplicate exists
-    if (sw->getDefaultValue() == cond && sw->getDefault() != nullptr) {
-      replaced = true;
+    if (sw->getDefaultValue() == cond && sw->getDefault() != nullptr)
       sw->setDefaultTarget(sw->getDefaultValue(), new_dst);
-    }
     int n_targets = sw->getNumTargets();
     for (int i = 0; i < n_targets; ++i) {
       auto &[val, dst] = sw->getTarget(i);
       (void)dst;
-      if (val == cond) {
+      if (val == cond)
         sw->setTarget(val, new_dst, i);
-        replaced = true;
-      }
     }
   }
-  return replaced;
 }
 
 void Branch::setTrue(Value *val, BasicBlock &target) {
