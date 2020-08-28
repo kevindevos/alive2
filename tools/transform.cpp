@@ -1277,6 +1277,7 @@ void Transform::preprocess(unsigned unroll_factor) {
       auto add_edge = [&](Value *cond, unsigned src, unsigned dst, bool replace,
                           bool as_back) {
         auto &src_data = lt.node_data[src];
+        auto &dst_data = lt.node_data[dst];
         auto instr = (JumpInstr*) &src_data.bb->back();
         bool replaced = false;
 
@@ -1288,9 +1289,10 @@ void Transform::preprocess(unsigned unroll_factor) {
               if (data.first == cond) {
                 data.second = as_back;
                 // replaced_edges[src].emplace_back(succ);
-                auto node_handler = lt.node_data[src].succs.extract(succ);
+                auto node_handler = succs.extract(succ);
                 node_handler.key() = dst;
-                lt.node_data[src].succs.insert(move(node_handler));
+                node_handler.mapped().second = as_back;
+                succs.insert(move(node_handler));
                 // TODO erase src from old_succ.preds without iterator
                 // invalidation
                 break;
@@ -1300,29 +1302,27 @@ void Transform::preprocess(unsigned unroll_factor) {
           }
         }
 
-        if (!replace || !replaced) {
-          if (as_back && !sink)
+        auto &num_preds_sink = unroll_data[dst].num_preds_changed_to_sink;
+        if (as_back) {
+          ++num_preds_sink;
+          if (!sink)
             sink = &fn->getBB("#sink");
-          auto dst_ = as_back ? *sink : lt.node_data[dst].bb;
+        }
+
+        if (!replaced) {
+          auto dst_ = as_back ? *sink : dst_data.bb;
           instr->addTarget(cond, *dst_);
-          lt.node_data[dst].preds.emplace_back(cond, src);
+          dst_data.preds.emplace_back(cond, src);
           lt.node_data[src].succs.emplace(dst, make_pair(cond, as_back));
         }
 
         // keep edge for checking phi entries
-        if (!replace || replaced) {
-          auto &num_preds_sink = unroll_data[dst].num_preds_changed_to_sink;
-          if (as_back)
-            ++num_preds_sink;
-          auto non_sink_preds = lt.node_data[dst].preds.size() - num_preds_sink;
-          auto &dst_d = lt.node_data[dst];
-          if (!as_back) {
-            auto &fi = dst_d.bb->front();
-            bool has_phi = dynamic_cast<Phi*>(&fi);
-            if (non_sink_preds > 1 || has_phi)
-              merge_in_edges.try_emplace(dst, src, non_sink_preds >= 2 &&
-                                                   !has_phi);
-          }
+        auto non_sink_preds = dst_data.preds.size() - num_preds_sink;
+        if (!as_back) {
+          bool has_phi = dynamic_cast<Phi*>(&dst_data.bb->front());
+          if (non_sink_preds > 1 || has_phi)
+            merge_in_edges.try_emplace(dst, src, non_sink_preds >= 2 &&
+                                                  !has_phi);
         }
       };
 
