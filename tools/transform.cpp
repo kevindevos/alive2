@@ -1134,13 +1134,6 @@ void Transform::preprocess(unsigned unroll_factor) {
       unsigned num_duped_bbs = 0;
       optional<BasicBlock*> sink;
 
-      // auto num_original_bbs = lt.node_data.size();
-
-      // keep track of edges that were replaced with replaceTarget
-      // for a edge case in back-edge testing
-      // vector<vector<unsigned>> replaced_edges;
-      // replaced_edges.resize(num_original_bbs);
-
       // all dupes and the bb_id they were created for a given instr
       unordered_map<Value*, list<pair<unsigned, Value*>>> instr_dupes;
 
@@ -1261,18 +1254,6 @@ void Transform::preprocess(unsigned unroll_factor) {
         return false;
       };
 
-      auto is_back_edge = [&](unsigned src, unsigned dst) -> bool {
-        auto &src_succs = lt.node_data[src].succs;
-        bool ret = false;
-        auto I = src_succs.find(dst);
-        if (I != src_succs.end())
-          ret = I->second.second;
-        // else if (src == unroll_data[src].first_original)
-        //   for (auto dst_ : replaced_edges[src])
-        //     if (dst_ == dst)
-        //       ret = true;
-        return ret;
-      };
 
       auto add_edge = [&](Value *cond, unsigned src, unsigned dst, bool replace,
                           bool to_sink) {
@@ -1287,7 +1268,6 @@ void Transform::preprocess(unsigned unroll_factor) {
           for (auto &[succ, data] : succs) {
             if (data.first == cond) {
               data.second = to_sink;
-              // replaced_edges[src].emplace_back(succ);
               auto node_handler = succs.extract(succ);
               node_handler.key() = dst;
               node_handler.mapped().second = to_sink;
