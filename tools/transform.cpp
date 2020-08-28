@@ -1326,24 +1326,24 @@ void Transform::preprocess(unsigned unroll_factor) {
         }
       };
 
-      auto duplicate_header = [&](unsigned loop, bool last_it)
-                                  -> optional<unsigned> {
-        optional<unsigned> duped_header;
+      // check if a node has exit edges - pointing outside the loop
+      auto has_exits = [&](unsigned bb, unsigned loop_header) -> bool {
+        for (auto &[dst, data] : lt.node_data[bb].succs)
+          if (!in_loop(dst, loop_header))
+              return true;
+        return false;
+      };
 
-        // return empty if duped header will have no outgoing edges
-        if (last_it) {
-          bool edge_will_be_added = false;
-          for (auto &[dst, data] : lt.node_data[loop].succs)
-            if (!in_loop(dst, loop))
-              edge_will_be_added = true;
-          if (!edge_will_be_added)
-            return duped_header;
-        }
+      auto add_edges_to_sink = [&](unsigned bb, unsigned ref_bb,
+                                   unsigned loop_header) {
+        for (auto &[dst, data] : lt.node_data[ref_bb].succs)
+          if (in_loop(dst, loop_header))
+            add_edge(data.first, bb, last_dupe(dst), false, true);
+      };
 
-        duped_header = dupe_bb(loop, loop);
-        auto &duped_header_data = lt.node_data[*duped_header];
-        ((JumpInstr*) &duped_header_data.bb->back())->clearTargets();
-
+      auto duplicate_header = [&](unsigned loop)  -> unsigned {
+        unsigned duped_header = dupe_bb(loop, loop);
+        ((JumpInstr*) &lt.node_data[duped_header].bb->back())->clearTargets();
         return duped_header;
       };
 
@@ -1393,29 +1393,50 @@ void Transform::preprocess(unsigned unroll_factor) {
             loops.pop();
             unroll_data[loop].pre_duped = true;
 
-            auto hdr = duplicate_header(loop, k == 1);
-            if (!hdr)
+            bool is_last_it = k == 1;
+            if (is_last_it && !has_exits(loop, cur_loop))
               break;
+            optional<unsigned> n_ = duplicate_header(loop);
 
             for (auto &[c, pred] : lt.node_data[loop].preds) {
               if (in_loop(pred, loop))
-                add_edge(c, pred, *hdr, is_back_edge(pred, loop), false);
+                add_edge(c, pred, *n_, is_back_edge(pred, loop), false);
             }
 
             for (auto &[dst, data] : lt.node_data[loop].succs) {
               if (!in_loop(dst, loop))
-                add_edge(data.first, *hdr, last_dupe(dst), false, false);
+                add_edge(data.first, *n_, last_dupe(dst), false, false);
             }
+
+            // back-edges as edges to #sink
+            if (is_last_it && n_)
+              add_edges_to_sink(*n_, loop, cur_loop);
           }
 
           auto n_prev = last_dupe(n);
           for (unsigned i = 1; i < k; ++i) {
             // create BB copies of the loop body and header
             duplicate_body();
-            bool last_it = i == k - 1;
-            auto n_ = duplicate_header(n, last_it);
 
-            // dupe body edges
+            optional<unsigned> n_;
+            bool is_last_it = i == k - 1;
+            if (!is_last_it || has_exits(n, cur_loop))
+               n_ = duplicate_header(n);
+
+            // dupe header edges
+            for (auto &[dst, data] : lt.node_data[n].succs) {
+              if (in_loop(dst, n))
+                add_edge(data.first, n_prev, last_dupe(dst), false, false);
+              else
+                if (n_)
+                  add_edge(data.first, *n_, dst, false, false);
+            }
+
+            // edges to #sink
+            if (is_last_it && n_)
+              add_edges_to_sink(*n_, n, cur_loop);
+
+             // dupe body edges
             auto &loop = lt.loop_data[n].nodes;
             auto loop_size = loop.size();
             for (unsigned i = 1; i < loop_size; ++i) {
@@ -1428,25 +1449,6 @@ void Transform::preprocess(unsigned unroll_factor) {
                 add_edge(data.first, last_dupe(bb), dst_, back_edge, back_edge);
               }
             }
-
-            // dupe header edges
-            for (auto &[dst, data] : lt.node_data[n].succs) {
-              if (in_loop(dst, n))
-                add_edge(data.first, n_prev, last_dupe(dst), false, false);
-              else
-                if (n_)
-                  add_edge(data.first, *n_, dst, false, false);
-
-            }
-
-            if (last_it) {
-              // back-edges as edges to #sink
-              for (auto &[dst, data] : lt.node_data[*n_].succs) {
-                if (in_loop(dst, *n_))
-                  add_edge(data.first, *n_, last_dupe(dst), false, true);
-              }
-            }
-
             n_prev = *n_;
           }
           prev_loop = cur_loop;
