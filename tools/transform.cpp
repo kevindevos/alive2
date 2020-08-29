@@ -1139,7 +1139,8 @@ void Transform::preprocess(unsigned unroll_factor) {
 
       // keep edges to merges to check for phis
       // dst -> <src, became_merge>
-      unordered_map<unsigned, pair<unsigned, bool>> merge_in_edges;
+      vector<optional<bool>> merge_in_edges;
+      merge_in_edges.resize(lt.node_data.size());
 
       // Prepare data structure for unroll algorithm
       for (auto node : lt.node_data) {
@@ -1166,6 +1167,7 @@ void Transform::preprocess(unsigned unroll_factor) {
       };
 
       auto dupe_bb = [&](unsigned bb, unsigned loop) -> unsigned {
+        merge_in_edges.emplace_back();
         lt.node_data.reserve(lt.node_data.size()+1);
         auto &bb_data = lt.node_data[bb];
         bb_data.id = bb;
@@ -1299,9 +1301,11 @@ void Transform::preprocess(unsigned unroll_factor) {
         auto non_sink_preds = dst_data.preds.size() - num_preds_sink;
         if (!to_sink) {
           bool has_phi = dynamic_cast<Phi*>(&dst_data.bb->front());
-          if (non_sink_preds > 1 || has_phi)
-            merge_in_edges.try_emplace(dst, src, non_sink_preds >= 2 &&
-                                                  !has_phi);
+          if (non_sink_preds > 1 || has_phi) {
+            auto &mie = merge_in_edges[dst];
+            if (!mie)
+              mie = non_sink_preds >= 2 && !has_phi;
+          }
         }
       };
 
@@ -1499,12 +1503,19 @@ void Transform::preprocess(unsigned unroll_factor) {
         auto users = fn->getUsers();
 
         // check if necessary to add phi instructions
-        for (auto [merge, data] : merge_in_edges) {
+        for (auto I = bbs_top_order.rbegin(), E = bbs_top_order.rend(); I != E;
+             ++I) {
+          auto merge = *I;
+          auto &mie = merge_in_edges[merge];
+          if (!mie)
+            continue;
+          auto &became_merge = *mie;
           auto &merge_data = lt.node_data[merge];
+
           unordered_set<Value*> seen_uses;
           vector<unique_ptr<Phi>> to_insert;
 
-          if (data.second) {
+          if (became_merge) {
             // get range of preds in topological order
             unsigned first = 0;
             unsigned last = 0;
@@ -1547,6 +1558,7 @@ void Transform::preprocess(unsigned unroll_factor) {
                     auto &phi_ = to_insert.emplace_back(move(phi));
                     unroll_data[merge].dupes.emplace_front(val, &(*phi_));
                     phi_use[&(*phi_)] = val;
+                    // update dupes
                     auto &dupes = instr_dupes[val];
                     for (auto II = dupes.begin(), EE = dupes.end(); II != EE;
                          ++II) {
@@ -1555,6 +1567,8 @@ void Transform::preprocess(unsigned unroll_factor) {
                         break;
                       }
                     }
+                    // update users
+                    users.emplace(I->first, &(*phi_));
                     break;
                   }
                 }
