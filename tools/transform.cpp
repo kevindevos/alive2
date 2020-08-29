@@ -181,9 +181,47 @@ static void error(Errors &errs, State &src_state, State &tgt_state,
   errs.add(s.str(), true);
 }
 
+static void remove_unreachable_bbs(Function &f) {
+  vector<BasicBlock*> wl;
+  wl.emplace_back(&f.getFirstBB());
+  set<BasicBlock*> reachable;
+
+  do {
+    auto bb = wl.back();
+    wl.pop_back();
+    if (!reachable.emplace(bb).second)
+      continue;
+
+    if (auto instr = dynamic_cast<JumpInstr*>(&bb->back())) {
+      for (auto &target : instr->targets()) {
+        wl.emplace_back(const_cast<BasicBlock*>(&target));
+      }
+    }
+  } while (!wl.empty());
+
+  auto all_bbs = f.getBBs(); // copy intended
+  vector<string> unreachable;
+  for (auto bb : all_bbs) {
+    if (!reachable.count(bb)) {
+      unreachable.emplace_back(bb->getName());
+      f.removeBB(*bb);
+    }
+  }
+
+  for (auto &i : f.instrs()) {
+    if (auto phi = dynamic_cast<const Phi*>(&i)) {
+      for (auto &bb : unreachable) {
+        const_cast<Phi*>(phi)->removeValue(bb);
+      }
+    }
+  }
+}
 
 static expr preprocess(Transform &t, const set<expr> &qvars0,
                        const set<expr> &undef_qvars, expr && e) {
+  remove_unreachable_bbs(t.src);
+  remove_unreachable_bbs(t.tgt);
+
   if (hit_half_memory_limit())
     return expr::mkForAll(qvars0, move(e));
 
