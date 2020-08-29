@@ -600,7 +600,7 @@ void LoopTree::buildLoopTree() {
 
     if (!visited[cur]) {
       visited[cur] = true;
-      for (auto succ : node_data[cur].succs) {
+      for (auto &succ : node_data[cur].succs) {
         work_list.push(succ.first);
         succ.second.second = isAncestor(number[succ.first], number[cur]);
       }
