@@ -42,7 +42,6 @@ public:
     return m_instrs;
   }
   Instr& back() { return *m_instrs.back(); }
-  const Instr& back() const { return *m_instrs.back(); }
 
   bool empty() const { return m_instrs.empty(); }
 
