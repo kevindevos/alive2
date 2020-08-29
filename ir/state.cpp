@@ -117,10 +117,9 @@ bool State::startBB(const BasicBlock &bb) {
   domain.reset();
   isolated_ub.reset();
 
-  if (&f.getFirstBB() == &bb) {
-    global_target_data[&bb].path_estimated_size = 0;
+  if (&f.getFirstBB() == &bb)
     return true;
-  }
+
 
   auto I = predecessor_data.find(&bb);
   if (I == predecessor_data.end())
@@ -148,101 +147,6 @@ bool State::startBB(const BasicBlock &bb) {
   return domain;
 }
 
-// build a formula for the paths reaching the set of bb's in bbs and not
-// reaching the merge
-expr State::buildPathFromDomForBBs(const BasicBlock &merge, const BasicBlock
-                                   &dom, unordered_set<const BasicBlock*>
-                                   *bbs) {
-  // bb -> <visited, path>
-  unordered_map<const BasicBlock*, pair<bool, optional<expr>>> build_path_data;
-  stack<const BasicBlock*> S;
-  build_path_data[&merge].second = false;
-  S.push(&dom);
-
-  while (!S.empty()) {
-    auto cur_bb = S.top();
-    S.pop();
-    auto &[visited, path] = build_path_data[cur_bb];
-
-    if (!visited) {
-      visited = true;
-
-      if (cur_bb == &merge)
-        continue;
-
-      if (bbs->find(cur_bb) == bbs->end()) {
-        S.push(cur_bb);
-        for (auto &[tgt_bb, cond] : global_target_data[cur_bb].dsts) {
-          (void)cond;
-          S.push(tgt_bb);
-        }
-      } else {
-        build_path_data[cur_bb].second = true;
-      }
-    } else {
-      if (path)
-        continue;
-      path = false;
-      
-      for (auto &[tgt_bb, cond] : global_target_data[cur_bb].dsts) {
-        auto &tgt_path = build_path_data[tgt_bb].second;
-        if (tgt_path)
-          path = *path || (cond && *tgt_path);
-      }
-    }
-  }
-  return *build_path_data[&dom].second;
-}
-
-void State::buildPostdomBreakingBBs(const BasicBlock &merge,
-                                    const BasicBlock &dom,
-                                    unordered_set<const BasicBlock*> *pb_bbs) {
-  unordered_map<const BasicBlock*, unordered_set<const BasicBlock*>> 
-    bb_seen_targets;
-  unordered_map<const BasicBlock*, bool> v;
-  stack<const BasicBlock*> S;
-  S.push(&merge);
-  auto cur_bb = &merge;
-
-  while (!S.empty()) {
-    cur_bb = S.top();
-    S.pop();
-    auto &visited = v[cur_bb];
-    
-    if (!visited && cur_bb != &dom) {
-      visited = true;
-
-      for (auto const &pred : predecessor_data[cur_bb]) {
-        bb_seen_targets[pred.first].insert(cur_bb);
-        S.push(pred.first);
-      }
-    }
-  }
-
-  for (auto &[bb, seen_targets] : bb_seen_targets) {
-    auto jmp_instr = static_cast<JumpInstr*>(bb->back());
-    auto tgt_count = jmp_instr->getTargetCount();
-   
-    // only count unique targets for switches
-    if (auto sw = dynamic_cast<Switch*>(bb->back()))
-      tgt_count = sw->getNumUniqueTargets();
-    
-    if (seen_targets.size() != tgt_count) {
-      // If condition fails double check to exclude bb's with unreachable
-      // from counting
-      for (auto &[target, tgt_data] : global_target_data[bb].dsts) {
-        (void)tgt_data;
-        if (no_ret_bbs.find(target) != no_ret_bbs.end())
-          --tgt_count;
-        else {
-          if (seen_targets.find(target) == seen_targets.end())
-            pb_bbs->insert(target);
-        }
-      }
-    }
-  }
-}
-
 expr State::buildUB() {
   return buildUB(&global_target_data);
 }
@@ -255,12 +159,13 @@ expr State::buildUB(unordered_map<const BasicBlock*, TargetData> *tdata) {
 
   // 2 phases:
   // 1º - visit and push tgts of this bb to ensure traversal of sucessors first
-  // 2º - visit and build the ub as ite's 
+  // 2º - visit and build the ub as ite's
   while (!S.empty()) {
     auto cur_bb = S.top();
     S.pop();
 
     auto &[visited, ub, carry_ub, ub_size] = build_ub_data[cur_bb];
+    (void)carry_ub;
     if (!visited) {
       visited = true;
       S.push(cur_bb);
@@ -271,116 +176,31 @@ expr State::buildUB(unordered_map<const BasicBlock*, TargetData> *tdata) {
         (void)cond;
         S.push(tgt_bb);
       }
-      if (cur_data.dsts.empty()) 
-        ub_size = cur_data.ub_estimated_size;
     } else {
       if (!ub) {
         auto &cur_data = (*tdata)[cur_bb];
-        
+
         // skip bb's that do not have set ub (ex: bb only has back-edges)
         if (!cur_data.ub)
           continue;
-        
+
         // build ub for targets
         for (auto &[tgt_bb, cond] : cur_data.dsts) {
           auto &tgt_data = build_ub_data[tgt_bb];
-          if (tgt_data.ub) {
+          if (tgt_data.ub)
             ub = ub ? expr::mkIf(cond, *tgt_data.ub, *ub) : tgt_data.ub;
-            ub_size += tgt_data.ub_estimated_size;
-          }
         }
-        ub_size += cur_data.ub_estimated_size;
-        
+
         // only add current ub if at least one target has set ub
         if (ub || cur_data.dsts.empty()) {
           // 'and' the isolated ub of cur_bb with the (if built) targets ub
           auto &cur_ub = cur_data.ub;
           ub = ub ? *ub && *cur_ub : cur_ub;
-          if (carry_ub)
-            ub = *ub && *carry_ub;
-
-          auto pred_data = predecessor_data[cur_bb];
-          if (pred_data.size() > 1) {
-            if (!dom_tree) {
-              cfg = make_unique<CFG>(f);
-              dom_tree = make_unique<DomTree>(f, *cfg);
-            }
-
-            expr move_cond;
-            const BasicBlock *dom = nullptr;
-            // if return and is single one then move_cond is trivially true
-            if (cur_data.has_return && num_returns == 1) {
-              move_cond = true;
-              dom = &f.getFirstBB();
-            } else {
-              dom = dom_tree->getIDominator(*cur_bb);
-              unordered_set<const BasicBlock*> pb_bbs;
-              buildPostdomBreakingBBs(*cur_bb, *dom, &pb_bbs);
-              if (pb_bbs.empty()) {
-                move_cond = true;
-              } else {
-                // estimate path cost for calculating the heuristic
-                unsigned cost = 0;
-                for (auto &bb : pb_bbs)
-                  cost += global_target_data[bb].path_estimated_size;
-                if (cost) {
-                  auto &dom_size = global_target_data[dom].path_estimated_size;
-                  cost -= dom_size * pb_bbs.size();
-                }
-                cost = cost * cost;
-
-                // if duplicating path cost is estimated to be superior to 
-                // duplicating ub, then do not move the merge ub to its dom
-                if (cost > ub_size)
-                  continue;
-                move_cond = !buildPathFromDomForBBs(*cur_bb, *dom, &pb_bbs);
-              }
-            }
-            auto &dom_carry = build_ub_data[dom].carry_ub;
-            auto e = !move_cond || *ub;
-            dom_carry = dom_carry ? e && *dom_carry : e;
-            ub = true;
-          }
         }
       }
     }
   }
   return *build_ub_data[&f.getFirstBB()].ub;
-}
-
-// walk up the CFG to add bb's to no_ret_bbs which when reached will always
-// lead execution to an unreachable or a back-edge
-// this is useful for ignoring unecessary paths quickly by checking no_ret_bbs
-void State::propagateNoRetBB(const BasicBlock &bb) {
-  stack<const BasicBlock*> S;
-
-  no_ret_bbs.insert(&bb);
-  for (auto &[pred, data] : predecessor_data[&bb])
-    S.push(pred);
-
-  while (!S.empty()) {
-    auto cur_bb = S.top();
-    S.pop();
-
-    auto jmp_instr = static_cast<JumpInstr*>(cur_bb->back());
-    if (jmp_instr->getTargetCount() == 1) {
-      no_ret_bbs.insert(cur_bb);
-      for (auto &[pred, data] : predecessor_data[cur_bb])
-        S.push(pred);
-    } else {	
-      unsigned no_ret_cnt = 0;
-      auto jmp_tgts = jmp_instr->targets();
-      for (auto I = jmp_tgts.begin(), E = jmp_tgts.end(); I != E; ++I) {
-        if (no_ret_bbs.find(&(*I)) != no_ret_bbs.end())
-          ++no_ret_cnt;
-      }	
-      if (no_ret_cnt == jmp_instr->getTargetCount()) {
-        no_ret_bbs.insert(cur_bb);
-        for (auto &[pred, data] : predecessor_data[cur_bb])
-          S.push(pred);
-      }
-    }
-  }
 }
 
 void State::setReturnDomain(expr &&ret_dom) {
@@ -398,21 +218,8 @@ void State::addJump(const BasicBlock &dst0, expr &&cond) {
     return;
 
   auto dst = &dst0;
-  if (seen_bbs.count(dst)) {
+  if (seen_bbs.count(dst))
     dst = &f.getBB("#sink");
-    auto &cnt = back_edge_counter[current_bb];
-    ++cnt;
-    auto jump_instr = static_cast<JumpInstr*>(current_bb->back());
-    auto tgt_count = jump_instr->getTargetCount();
-    // in case of switch use unique target count
-    if (auto sw = dynamic_cast<Switch*>(jump_instr))
-      tgt_count = sw->getNumUniqueTargets();
-
-    if (cnt == tgt_count) {
-      propagateNoRetBB(*current_bb);
-      back_edge_counter.erase(current_bb);
-    }
-  }
 
   auto &data = predecessor_data[dst][current_bb];
   auto &domain_preds = get<0>(data);
@@ -425,8 +232,6 @@ void State::addJump(const BasicBlock &dst0, expr &&cond) {
     auto &tdata = global_target_data[current_bb];
     tdata.dsts.emplace_back(dst, *c);
     tdata.ub = isolated_ub();
-    tdata.ub_estimated_size = isolated_ub.size();
-    global_target_data[dst].path_estimated_size = tdata.path_estimated_size + 1;
   }
 
   cond &= domain.path;
@@ -458,7 +263,6 @@ void State::addReturn(const StateValue &val) {
   auto cur_bb_tgt_data = &global_target_data[current_bb];
   cur_bb_tgt_data->ub = isolated_ub();
   cur_bb_tgt_data->has_return = true;
-  cur_bb_tgt_data->ub_estimated_size = isolated_ub.size();
   return_val.add(val, domain.path);
   return_memory.add(memory, domain.path);
   return_domain.add(domain());
