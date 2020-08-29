@@ -1535,14 +1535,15 @@ void Transform::preprocess(unsigned unroll_factor) {
 
             // add phi's to merge for uses that have different values between
             // preds
-            unordered_set<Value*> seen_uses;
+            unordered_set<Value*> added_phi;
             for (auto i = min; i <= max; ++i) {
               auto bb = bbs_top_order[i];
               if (!isAncestor(first, bb) || !isAncestor(bb, last))
                 continue;
               for (auto dupe : unroll_data[bb].dupes) {
                 auto val = dupe.first;
-                if (!seen_uses.insert(val).second)
+                auto I = added_phi.find(val);
+                if (I != added_phi.end())
                   continue;
                 auto uses = users.equal_range(val); // uses for original
 
@@ -1551,6 +1552,7 @@ void Transform::preprocess(unsigned unroll_factor) {
                   // If there is a use after the merge for the duped var then
                   // add phi in merge
                   if (isAncestor(merge, cbbid)) {
+                    added_phi.insert(val);
                     auto &sfx = unroll_data[merge].suffix;
                     auto phi = make_unique<Phi>(val->getType(),
                                                 I->first->getName() + sfx +
