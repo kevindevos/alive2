@@ -29,10 +29,6 @@ void BasicBlock::addInstr(unique_ptr<Instr> &&i) {
   m_instrs.push_back(move(i));
 }
 
-Instr* BasicBlock::back() const {
-  return !empty() ? &(*m_instrs.back()) : nullptr;
-}
-
 unique_ptr<BasicBlock> BasicBlock::dup(const string &suffix) const {
   auto newbb = make_unique<BasicBlock>(name + suffix);
   for (auto &i : instrs()) {
@@ -243,7 +239,7 @@ void CFG::edge_iterator::next() {
     if (bbi == bbe)
       return;
 
-    if (auto instr = dynamic_cast<JumpInstr*>((*bbi)->back())) {
+    if (auto instr = dynamic_cast<JumpInstr*>(&(*bbi)->back())) {
       ti = instr->targets().begin();
       te = instr->targets().end();
       return;
@@ -261,7 +257,7 @@ CFG::edge_iterator::edge_iterator(vector<BasicBlock*>::iterator &&it,
 
 tuple<const BasicBlock&, const BasicBlock&, const Instr&>
   CFG::edge_iterator::operator*() const {
-  return { **bbi, *ti, *(*bbi)->back() };
+  return { **bbi, *ti, (*bbi)->back() };
 }
 
 void CFG::edge_iterator::operator++(void) {
@@ -312,7 +308,7 @@ void DomTree::buildDominators() {
   auto &entry = doms.at(&f.getFirstBB());
   entry.dominator = &entry;
 
-  // Cooper, Keith D.; Harvey, Timothy J.; and Kennedy, Ken (2001). 
+  // Cooper, Keith D.; Harvey, Timothy J.; and Kennedy, Ken (2001).
   // A Simple, Fast Dominance Algorithm
   // http://www.cs.rice.edu/~keith/EMBED/dom.pdf
   // Makes multiple passes when CFG is cyclic to update incorrect initial
@@ -324,7 +320,7 @@ void DomTree::buildDominators() {
       auto &b_node = doms.at(b);
       if (b_node.preds.empty())
         continue;
-      
+
       auto new_idom = b_node.preds.front();
       for (auto p : b_node.preds) {
         if (p->dominator != nullptr) {
@@ -370,5 +366,5 @@ void DomTree::printDot(std::ostream &os) const {
   os << "}\n";
 }
 
-} 
+}
 
