@@ -183,7 +183,7 @@ expr State::buildPathFromDomForBBs(const BasicBlock &merge, const BasicBlock
       if (path)
         continue;
       path = false;
-      
+
       for (auto &[tgt_bb, cond] : global_target_data[cur_bb].dsts) {
         auto &tgt_path = build_path_data[tgt_bb].second;
         if (tgt_path)
@@ -197,7 +197,7 @@ expr State::buildPathFromDomForBBs(const BasicBlock &merge, const BasicBlock
 void State::buildPostdomBreakingBBs(const BasicBlock &merge,
                                     const BasicBlock &dom,
                                     unordered_set<const BasicBlock*> *pb_bbs) {
-  unordered_map<const BasicBlock*, unordered_set<const BasicBlock*>> 
+  unordered_map<const BasicBlock*, unordered_set<const BasicBlock*>>
     bb_seen_targets;
   unordered_map<const BasicBlock*, bool> v;
   stack<const BasicBlock*> S;
@@ -208,7 +208,7 @@ void State::buildPostdomBreakingBBs(const BasicBlock &merge,
     cur_bb = S.top();
     S.pop();
     auto &visited = v[cur_bb];
-    
+
     if (!visited && cur_bb != &dom) {
       visited = true;
 
@@ -222,11 +222,11 @@ void State::buildPostdomBreakingBBs(const BasicBlock &merge,
   for (auto &[bb, seen_targets] : bb_seen_targets) {
     auto jmp_instr = static_cast<JumpInstr*>(bb->back());
     auto tgt_count = jmp_instr->getTargetCount();
-   
+
     // only count unique targets for switches
     if (auto sw = dynamic_cast<Switch*>(bb->back()))
       tgt_count = sw->getNumUniqueTargets();
-    
+
     if (seen_targets.size() != tgt_count) {
       // If condition fails double check to exclude bb's with unreachable
       // from counting
@@ -255,7 +255,7 @@ expr State::buildUB(unordered_map<const BasicBlock*, TargetData> *tdata) {
 
   // 2 phases:
   // 1º - visit and push tgts of this bb to ensure traversal of sucessors first
-  // 2º - visit and build the ub as ite's 
+  // 2º - visit and build the ub as ite's
   while (!S.empty()) {
     auto cur_bb = S.top();
     S.pop();
@@ -271,16 +271,16 @@ expr State::buildUB(unordered_map<const BasicBlock*, TargetData> *tdata) {
         (void)cond;
         S.push(tgt_bb);
       }
-      if (cur_data.dsts.empty()) 
+      if (cur_data.dsts.empty())
         ub_size = cur_data.ub_estimated_size;
     } else {
       if (!ub) {
         auto &cur_data = (*tdata)[cur_bb];
-        
+
         // skip bb's that do not have set ub (ex: bb only has back-edges)
         if (!cur_data.ub)
           continue;
-        
+
         // build ub for targets
         for (auto &[tgt_bb, cond] : cur_data.dsts) {
           auto &tgt_data = build_ub_data[tgt_bb];
@@ -290,7 +290,7 @@ expr State::buildUB(unordered_map<const BasicBlock*, TargetData> *tdata) {
           }
         }
         ub_size += cur_data.ub_estimated_size;
-        
+
         // only add current ub if at least one target has set ub
         if (ub || cur_data.dsts.empty()) {
           // 'and' the isolated ub of cur_bb with the (if built) targets ub
@@ -319,20 +319,6 @@ expr State::buildUB(unordered_map<const BasicBlock*, TargetData> *tdata) {
               if (pb_bbs.empty()) {
                 move_cond = true;
               } else {
-                // estimate path cost for calculating the heuristic
-                unsigned cost = 0;
-                for (auto &bb : pb_bbs)
-                  cost += global_target_data[bb].path_estimated_size;
-                if (cost) {
-                  auto &dom_size = global_target_data[dom].path_estimated_size;
-                  cost -= dom_size * pb_bbs.size();
-                }
-                cost = cost * cost;
-
-                // if duplicating path cost is estimated to be superior to 
-                // duplicating ub, then do not move the merge ub to its dom
-                if (cost > ub_size)
-                  continue;
                 move_cond = !buildPathFromDomForBBs(*cur_bb, *dom, &pb_bbs);
               }
             }
@@ -367,13 +353,13 @@ void State::propagateNoRetBB(const BasicBlock &bb) {
       no_ret_bbs.insert(cur_bb);
       for (auto &[pred, data] : predecessor_data[cur_bb])
         S.push(pred);
-    } else {	
+    } else {
       unsigned no_ret_cnt = 0;
       auto jmp_tgts = jmp_instr->targets();
       for (auto I = jmp_tgts.begin(), E = jmp_tgts.end(); I != E; ++I) {
         if (no_ret_bbs.find(&(*I)) != no_ret_bbs.end())
           ++no_ret_cnt;
-      }	
+      }
       if (no_ret_cnt == jmp_instr->getTargetCount()) {
         no_ret_bbs.insert(cur_bb);
         for (auto &[pred, data] : predecessor_data[cur_bb])
