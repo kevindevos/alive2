@@ -41,7 +41,8 @@ public:
   util::const_strip_unique_ptr<decltype(m_instrs)> instrs() const {
     return m_instrs;
   }
-  Instr* back() const;
+  Instr& back() { return *m_instrs.back(); }
+  const Instr& back() const { return *m_instrs.back(); }
 
   bool empty() const { return m_instrs.empty(); }
 
@@ -87,7 +88,7 @@ public:
   smt::expr getTypeConstraints() const;
   void fixupTypes(const smt::Model &m);
 
-  const BasicBlock& getFirstBB() const { return *BB_order[0]; }
+  BasicBlock& getFirstBB() const { return *BB_order[0]; }
   BasicBlock& getBB(std::string_view name, bool push_front = false);
   const BasicBlock& getBB(std::string_view name) const;
   const BasicBlock* getBBIfExists(std::string_view name) const;
