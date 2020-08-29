@@ -1525,7 +1525,7 @@ void Transform::preprocess(unsigned unroll_factor) {
             // add phi's to merge for uses that have different values between
             // preds
             unordered_set<Value*> seen_uses;
-            for (auto i = min, end = max; i != end; ++i) {
+            for (auto i = min; i <= max; ++i) {
               auto bb = bbs_top_order[i];
               if (!isAncestor(first, bb) || !isAncestor(bb, last))
                 continue;
