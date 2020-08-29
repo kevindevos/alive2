@@ -1138,6 +1138,7 @@ void Transform::preprocess(unsigned unroll_factor) {
       unordered_map<Value*, list<pair<unsigned, Value*>>> instr_dupes;
 
       // keep edges to merges to check for phis
+      // dst -> <src, became_merge>
       unordered_map<unsigned, pair<unsigned, bool>> merge_in_edges;
 
       // Prepare data structure for unroll algorithm
@@ -1393,7 +1394,7 @@ void Transform::preprocess(unsigned unroll_factor) {
 
           auto n_prev = last_dupe(n);
           for (unsigned i = 1; i < k; ++i) {
-            // create BB copies of the loop body and header
+            // create BB copies of the loop body
             duplicate_body();
 
             optional<unsigned> n_;
@@ -1447,8 +1448,6 @@ void Transform::preprocess(unsigned unroll_factor) {
         vector<unsigned> sorted;
         vector<unsigned> worklist;
         vector<pair<bool, bool>> marked; // <visited, pushed>
-        vector<unsigned> top_order_idx;
-        top_order_idx.resize(lt.node_data.size());
         marked.resize(lt.node_data.size());
         worklist.push_back(lt.ROOT_ID);
 
@@ -1468,7 +1467,6 @@ void Transform::preprocess(unsigned unroll_factor) {
           } else {
             if (!pushed) {
               lt.last[lt.number[cur]] = current - 1;
-              top_order_idx[cur] = sorted.size();
               sorted.emplace_back(cur);
               pushed = true;
             }
@@ -1476,10 +1474,17 @@ void Transform::preprocess(unsigned unroll_factor) {
         }
 
         // update BB_order in function for the desired topological order
+        vector<unsigned> bbs_top_order;
+        vector<unsigned> top_order_idx;
+        top_order_idx.resize(lt.node_data.size());
         auto &bbs = fn->getBBs();
         bbs.clear();
-        for (auto I = sorted.rbegin(), E = sorted.rend(); I != E; ++I)
-          bbs.emplace_back(lt.node_data[*I].bb);
+        for (auto I = sorted.rbegin(), E = sorted.rend(); I != E; ++I) {
+          auto id = *I;
+          bbs.emplace_back(lt.node_data[id].bb);
+          top_order_idx[id] = bbs_top_order.size();
+          bbs_top_order.emplace_back(id);
+        }
 
         // check if a_id is ancestor of b_id
         // credit to paper & authors:
@@ -1504,7 +1509,7 @@ void Transform::preprocess(unsigned unroll_factor) {
             unsigned first = 0;
             unsigned last = 0;
             unsigned max = 0;
-            auto min = bbs.size();
+            unsigned min = bbs.size();
             for (auto pred : merge_data.preds) {
               auto top_order = top_order_idx[pred.second];
               if (top_order < min) {
@@ -1520,7 +1525,8 @@ void Transform::preprocess(unsigned unroll_factor) {
             // add phi's to merge for uses that have different values between
             // preds
             unordered_set<Value*> seen_uses;
-            for (auto bb = sorted[first], end = sorted[last]; bb != end; ++bb) {
+            for (auto i = min, end = max; i != end; ++i) {
+              auto bb = bbs_top_order[i];
               if (!isAncestor(first, bb) || !isAncestor(bb, last))
                 continue;
               for (auto dupe : unroll_data[bb].dupes) {
