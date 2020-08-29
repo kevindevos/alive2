@@ -220,11 +220,12 @@ void State::buildPostdomBreakingBBs(const BasicBlock &merge,
   }
 
   for (auto &[bb, seen_targets] : bb_seen_targets) {
-    auto jmp_instr = static_cast<JumpInstr*>(bb->back());
+    auto bb_ = const_cast<BasicBlock*>(bb);
+    auto jmp_instr = static_cast<JumpInstr*>(&bb_->back());
     auto tgt_count = jmp_instr->getTargetCount();
    
     // only count unique targets for switches
-    if (auto sw = dynamic_cast<Switch*>(bb->back()))
+    if (auto sw = dynamic_cast<Switch*>(&bb_->back()))
       tgt_count = sw->getNumUniqueTargets();
     
     if (seen_targets.size() != tgt_count) {
@@ -362,7 +363,8 @@ void State::propagateNoRetBB(const BasicBlock &bb) {
     auto cur_bb = S.top();
     S.pop();
 
-    auto jmp_instr = static_cast<JumpInstr*>(cur_bb->back());
+    auto cur_bb_ = const_cast<BasicBlock*>(cur_bb);
+    auto jmp_instr = static_cast<JumpInstr*>(&cur_bb_->back());
     if (jmp_instr->getTargetCount() == 1) {
       no_ret_bbs.insert(cur_bb);
       for (auto &[pred, data] : predecessor_data[cur_bb])
@@ -402,7 +404,8 @@ void State::addJump(const BasicBlock &dst0, expr &&cond) {
     dst = &f.getBB("#sink");
     auto &cnt = back_edge_counter[current_bb];
     ++cnt;
-    auto jump_instr = static_cast<JumpInstr*>(current_bb->back());
+    auto current_bb_ = const_cast<BasicBlock*>(current_bb);
+    auto jump_instr = static_cast<JumpInstr*>(&current_bb_->back());
     auto tgt_count = jump_instr->getTargetCount();
     // in case of switch use unique target count
     if (auto sw = dynamic_cast<Switch*>(jump_instr))
