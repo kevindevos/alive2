@@ -1522,20 +1522,14 @@ void Transform::preprocess(unsigned unroll_factor) {
 
           if (became_merge) {
             // get range of preds in topological order
-            unsigned first = 0;
-            unsigned last = 0;
             unsigned max = 0;
             unsigned min = bbs.size();
             for (auto pred : merge_data.preds) {
               auto top_order = top_order_idx[pred.second];
-              if (top_order < min) {
+              if (top_order < min)
                 min = top_order;
-                first = pred.second;
-              }
-              if (top_order >= max) {
+              if (top_order >= max)
                 max = top_order;
-                last = pred.second;
-              }
             }
 
             // add phi's to merge for uses that have different values between
@@ -1543,8 +1537,6 @@ void Transform::preprocess(unsigned unroll_factor) {
             unordered_set<Value*> added_phi;
             for (auto i = min; i <= max; ++i) {
               auto bb = bbs_top_order[i];
-              if (!is_ancestor(first, bb) || !is_ancestor(bb, last))
-                continue;
               for (auto dupe : unroll_data[bb].dupes) {
                 auto val = dupe.first;
                 auto I = added_phi.find(val);
