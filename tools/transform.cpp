@@ -1494,7 +1494,7 @@ void Transform::preprocess(unsigned unroll_factor) {
             auto bb = wl.back();
             wl.pop_back();
             for (auto &s : lt.node_data[bb].succs) {
-              if (tc.insert(s.first).second) {
+              if (!s.second.second && tc.insert(s.first).second) {
                 wl.push_back(s.first);
                 if (s.first == bb2)
                   found = true;
