@@ -1439,16 +1439,8 @@ void Transform::preprocess(unsigned unroll_factor) {
         }
       }
 
-      unsigned current = 0;
       if (num_duped_bbs > 0) {
         // topsort in sort.h but specific to the data structures here + iterative
-        // also build new preorder + last numbering
-        lt.last.clear();
-        lt.number.clear();
-        lt.nodes.clear();
-        lt.last.resize(lt.node_data.size());
-        lt.number.resize(lt.node_data.size());
-        lt.nodes.resize(lt.node_data.size());
         vector<unsigned> sorted;
         vector<unsigned> worklist;
         vector<pair<bool, bool>> marked; // <visited, pushed>
@@ -1462,15 +1454,12 @@ void Transform::preprocess(unsigned unroll_factor) {
 
           if (!seen) {
             seen = true;
-            lt.nodes[current] = cur;
-            lt.number[cur] = current++;
             worklist.push_back(cur);
             for (auto child : lt.node_data[cur].succs)
               if (!child.second.second && !marked[child.first].first)
                 worklist.push_back(child.first);
           } else {
             if (!pushed) {
-              lt.last[lt.number[cur]] = current - 1;
               sorted.emplace_back(cur);
               pushed = true;
             }
@@ -1490,12 +1479,24 @@ void Transform::preprocess(unsigned unroll_factor) {
           bbs_top_order.emplace_back(id);
         }
 
-        // check if a_id is ancestor of b_id
-        // credit to paper & authors:
-        // Havlak, Paul (1997). Nesting of Reducible and Irreducible Loops.
-        auto isAncestor = [&](unsigned a_id, unsigned b_id) -> bool {
-          return lt.number[a_id] <= lt.number[b_id] &&
-                 lt.number[b_id] <= lt.last[lt.number[a_id]];
+        // check if bb1 is ancestor of bb2 through transitive closure of bb1
+        unordered_map<unsigned, unordered_set<unsigned>> transitive_closure;
+        auto is_ancestor = [&](unsigned bb1, unsigned bb2) -> bool {
+          auto &tc = transitive_closure[bb1];
+          if (!tc.empty())
+            return tc.count(bb2);
+
+          vector<unsigned> wl = { bb1 };
+          do {
+            auto bb = wl.back();
+            wl.pop_back();
+            for (auto &s : lt.node_data[bb].succs) {
+              if (tc.insert(s.first).second)
+                wl.push_back(s.first);
+            }
+          } while (!wl.empty());
+
+          return tc.count(bb2);
         };
 
         // update phi entries and add phi instructions when necessary
@@ -1511,7 +1512,6 @@ void Transform::preprocess(unsigned unroll_factor) {
             continue;
           auto &became_merge = *mie;
           auto &merge_data = lt.node_data[merge];
-
           unordered_set<Value*> seen_uses;
           vector<unique_ptr<Phi>> to_insert;
 
@@ -1538,7 +1538,7 @@ void Transform::preprocess(unsigned unroll_factor) {
             unordered_set<Value*> added_phi;
             for (auto i = min; i <= max; ++i) {
               auto bb = bbs_top_order[i];
-              if (!isAncestor(first, bb) || !isAncestor(bb, last))
+              if (!is_ancestor(first, bb) || !is_ancestor(bb, last))
                 continue;
               for (auto dupe : unroll_data[bb].dupes) {
                 auto val = dupe.first;
@@ -1551,7 +1551,7 @@ void Transform::preprocess(unsigned unroll_factor) {
                   auto cbbid = lt.bb_map[*((Instr*) I->second)->containingBB()];
                   // If there is a use after the merge for the duped var then
                   // add phi in merge
-                  if (isAncestor(merge, cbbid)) {
+                  if (is_ancestor(merge, cbbid)) {
                     added_phi.insert(val);
                     auto &sfx = unroll_data[merge].suffix;
                     auto phi = make_unique<Phi>(val->getType(),
@@ -1564,7 +1564,7 @@ void Transform::preprocess(unsigned unroll_factor) {
                     auto &dupes = instr_dupes[val];
                     for (auto II = dupes.begin(), EE = dupes.end(); II != EE;
                          ++II) {
-                      if (isAncestor(merge, II->first)) {
+                      if (is_ancestor(merge, II->first)) {
                         dupes.emplace(II, merge, &(*phi_));
                         break;
                       }
@@ -1620,15 +1620,15 @@ void Transform::preprocess(unsigned unroll_factor) {
                 }
 
                 Value *updated_val = val;
-                optional<unsigned> last_decl_bb;
+                optional<unsigned> l_decl_bb;
                 // get the deepest bb that has a decl for dupe of this var
                 // but still ancestor of pred.second
                 for (auto [decl_bb, duped_val] : instr_dupes[val]) {
-                  if (isAncestor(decl_bb, pred.second)) {
-                    if (last_decl_bb && !isAncestor(*last_decl_bb, decl_bb))
+                  if (is_ancestor(decl_bb, pred.second)) {
+                    if (l_decl_bb && !is_ancestor(*l_decl_bb, decl_bb))
                       continue;
                     updated_val = duped_val;
-                    last_decl_bb = decl_bb;
+                    l_decl_bb = decl_bb;
                   }
                 }
                 auto name = lt.node_data[pred.second].bb->getName();
@@ -1656,7 +1656,7 @@ void Transform::preprocess(unsigned unroll_factor) {
               auto containing_bb = *instr->containingBB();
               int c_bb_id = lt.bb_map[containing_bb];
               bool erased = false;
-              if (isAncestor(lt.nodes[i], c_bb_id)) {
+              if (is_ancestor(lt.nodes[i], c_bb_id)) {
                 // if same bb, verify use comes after declaration
                 auto what = I->first;
                 auto with = (Value*) i_dupe.second;
