@@ -1484,6 +1484,8 @@ void Transform::preprocess(unsigned unroll_factor) {
         auto is_ancestor = [&](unsigned bb1, unsigned bb2) -> bool {
           if (bb1 == bb2)
             return true;
+          if (top_order_idx[bb1] > top_order_idx[bb2])
+            return false;
           auto &tc = transitive_closure[bb1];
           if (!tc.empty())
             return tc.count(bb2);
