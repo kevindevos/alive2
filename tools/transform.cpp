@@ -1541,8 +1541,7 @@ void Transform::preprocess(unsigned unroll_factor) {
               auto bb = bbs_top_order[i];
               for (auto dupe : unroll_data[bb].dupes) {
                 auto val = dupe.first;
-                auto I = added_phi.find(val);
-                if (I != added_phi.end())
+                if (added_phi.count(val))
                   continue;
                 auto uses = users.equal_range(val); // uses for original
 
@@ -1583,7 +1582,7 @@ void Transform::preprocess(unsigned unroll_factor) {
               for (auto &[val, bb_name] : phi->getValues()) {
                 auto pred = lt.bb_map[&fn->getBB(bb_name)];
                 bool removed = false;
-                if (preds.find(pred) == preds.end()) {
+                if (!preds.count(pred)) {
                   phi->removeValue(bb_name);
                   removed = true;
                 }
