@@ -1566,16 +1566,7 @@ void Transform::preprocess(unsigned unroll_factor) {
                     auto &phi_ = to_insert.emplace_back(move(phi));
                     unroll_data[merge].dupes.emplace_front(val, &(*phi_));
                     phi_use[&(*phi_)] = val;
-                    // update dupes
-                    auto &dupes = instr_dupes[val];
-                    for (auto II = dupes.begin(), EE = dupes.end(); II != EE;
-                         ++II) {
-                      if (is_ancestor(merge, II->first)) {
-                        dupes.emplace(II, merge, &(*phi_));
-                        break;
-                      }
-                    }
-                    // update users
+                    instr_dupes[val].emplace_front(merge, &(*phi_));
                     users.emplace(I->first, &(*phi_));
                     break;
                   }
