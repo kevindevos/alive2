@@ -1486,17 +1486,21 @@ void Transform::preprocess(unsigned unroll_factor) {
           if (!tc.empty())
             return tc.count(bb2);
 
+          bool found = false;
           vector<unsigned> wl = { bb1 };
           do {
             auto bb = wl.back();
             wl.pop_back();
             for (auto &s : lt.node_data[bb].succs) {
-              if (tc.insert(s.first).second)
+              if (tc.insert(s.first).second) {
                 wl.push_back(s.first);
+                if (s.first == bb2)
+                  found = true;
+              }
             }
           } while (!wl.empty());
 
-          return tc.count(bb2);
+          return found;
         };
 
         // update phi entries and add phi instructions when necessary
