@@ -1510,12 +1510,11 @@ void Transform::preprocess(unsigned unroll_factor) {
         auto users = fn->getUsers();
 
         // check if necessary to add phi instructions
-        for (auto I = bbs_top_order.rbegin(), E = bbs_top_order.rend(); I != E;
-             ++I) {
-          auto merge = *I;
-          auto &mie = merge_in_edges[merge];
+        for (auto bb : bbs_top_order) {
+          auto &mie = merge_in_edges[bb];
           if (!mie)
             continue;
+          auto merge = bb; // naming semantics
           auto &became_merge = *mie;
           auto &merge_data = lt.node_data[merge];
           unordered_set<Value*> seen_uses;
