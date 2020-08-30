@@ -1619,16 +1619,16 @@ void Transform::preprocess(unsigned unroll_factor) {
                   continue;
                 }
 
+                // Get the most recently duped value between all preds for val
+                // Also use topological order because it is not guaranteed in
+                // instr_dupes
+                unsigned max = 0;
                 Value *updated_val = val;
-                optional<unsigned> l_decl_bb;
-                // get the deepest bb that has a decl for dupe of this var
-                // but still ancestor of pred.second
-                for (auto [decl_bb, duped_val] : instr_dupes[val]) {
-                  if (is_ancestor(decl_bb, pred.second)) {
-                    if (l_decl_bb && !is_ancestor(*l_decl_bb, decl_bb))
-                      continue;
+                for (auto &[decl_bb, duped_val] : instr_dupes[val]) {
+                  auto t_order = top_order_idx[decl_bb];
+                  if (t_order >= max && is_ancestor(decl_bb, pred.second)) {
                     updated_val = duped_val;
-                    l_decl_bb = decl_bb;
+                    max = t_order;
                   }
                 }
                 auto name = lt.node_data[pred.second].bb->getName();
