@@ -1482,10 +1482,10 @@ void Transform::preprocess(unsigned unroll_factor) {
         // check if bb1 is ancestor of bb2 through transitive closure of bb1
         unordered_map<unsigned, unordered_set<unsigned>> transitive_closure;
         auto is_ancestor = [&](unsigned bb1, unsigned bb2) -> bool {
-          if (bb1 == bb2)
-            return true;
           if (top_order_idx[bb1] > top_order_idx[bb2])
             return false;
+          if (bb1 == bb2)
+            return true;
           auto &tc = transitive_closure[bb1];
           if (!tc.empty())
             return tc.count(bb2);
