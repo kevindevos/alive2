@@ -335,10 +335,10 @@ void Solver::check(initializer_list<E> queries) {
     Solver s;
     s.add(q);
     auto res = s.check();
-    if (!res.isUnsat()) {
-      error(res);
-      return;
-    }
+    // if (!res.isUnsat()) {
+    //   error(res);
+    //   return;
+    // }
   }
 }
 
