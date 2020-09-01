@@ -1547,22 +1547,30 @@ void Transform::preprocess(unsigned unroll_factor) {
 
                 for (auto I = uses.first, E = uses.second; I != E; ++I) {
                   auto cbbid = lt.bb_map[*((Instr*) I->second)->containingBB()];
-                  // If there is a use after the merge for the duped var then
-                  // add phi in merge
-                  if (is_ancestor(merge, cbbid)) {
-                    added_phi.insert(val);
-                    auto &sfx = unroll_data[merge].suffix;
-                    auto phi = make_unique<Phi>(val->getType(),
-                                                I->first->getName() + sfx +
-                                                "_phi");
-                    auto &phi_ = to_insert.emplace_back(move(phi));
-                    unroll_data[merge].dupes.emplace_front(val, &(*phi_));
-                    phi_use[&(*phi_)] = val;
-                    instr_dupes[val].emplace_front(merge, &(*phi_));
-                    users.emplace(I->first, &(*phi_));
-                    break;
-                  }
+                  auto orig_cbbid = lt.bb_map[*((Instr*) val)->containingBB()];
+
+                  // if use does not come after merge skip
+                  if (!is_ancestor(merge, cbbid))
+                    continue;
+                  // if variable not declared yet before or at some pred, skip
+                  for (auto pred : merge_data.preds)
+                    if (pred.second != orig_cbbid &&
+                        is_ancestor(pred.second, orig_cbbid))
+                      goto next_duped_instr;
+
+                  added_phi.insert(val);
+                  auto &sfx = unroll_data[merge].suffix;
+                  auto phi = make_unique<Phi>(val->getType(),
+                                              I->first->getName() + sfx +
+                                              "_phi");
+                  auto &phi_ = to_insert.emplace_back(move(phi));
+                  unroll_data[merge].dupes.emplace_front(val, &(*phi_));
+                  phi_use[&(*phi_)] = val;
+                  instr_dupes[val].emplace_front(merge, &(*phi_));
+                  users.emplace(I->first, &(*phi_));
+                  break;
                 }
+next_duped_instr:;
               }
             }
           }
