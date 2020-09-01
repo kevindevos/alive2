@@ -1637,28 +1637,30 @@ next_duped_instr:;
           }
         }
 
-        // update instruction operands by traversing bb's in reverse preorder
-        for (int i = lt.nodes.size() - 1; i > -1; --i) {
-          for (auto &i_dupe : unroll_data[lt.nodes[i]].dupes) {
+        // update instruction operands by traversing bb's in reverse top order
+        for (auto I = bbs_top_order.rbegin(), E = bbs_top_order.rend(); I != E;
+             ++I) {
+          auto bb = *I;
+          for (auto &i_dupe : unroll_data[bb].dupes) {
             auto its = users.equal_range(i_dupe.first);
 
-            for (auto I = its.first, E = its.second; I != E;) {
-              auto instr = (Instr*) I->second;
+            for (auto II = its.first, E = its.second; II != E;) {
+              auto instr = (Instr*) II->second;
               if (dynamic_cast<Phi*>(instr)) {
-                ++I;
+                ++II;
                 continue;
               }
 
               // if dupe of declaration is ancestor of use then replace
               auto containing_bb = *instr->containingBB();
-              int c_bb_id = lt.bb_map[containing_bb];
+              auto c_bb_id = lt.bb_map[containing_bb];
               bool erased = false;
-              if (is_ancestor(lt.nodes[i], c_bb_id)) {
+              if (is_ancestor(bb, c_bb_id)) {
                 // if same bb, verify use comes after declaration
-                auto what = I->first;
+                auto what = II->first;
                 auto with = (Value*) i_dupe.second;
                 bool use_before_decl = false;
-                if (lt.nodes[i] == c_bb_id) {
+                if (bb == c_bb_id) {
                   for (auto &instr : containing_bb->instrs()) {
                     if (&instr == with)
                       break;
@@ -1670,12 +1672,12 @@ next_duped_instr:;
                 }
                 if (!use_before_decl) {
                   instr->rauw(*what, *with);
-                  users.erase(I++);
+                  users.erase(II++);
                   erased = true;
                 }
               }
               if (!erased) {
-                ++I;
+                ++II;
                 erased = false;
               }
             }
