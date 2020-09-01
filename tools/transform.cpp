@@ -1516,6 +1516,23 @@ void Transform::preprocess(unsigned unroll_factor) {
         // update phi entries and add phi instructions when necessary
         unordered_map<Value*, Value*> phi_use;
         auto users = fn->getUsers();
+        unordered_set<Phi*> seen_phi;
+
+        // Get the most recently duped value given a value and the pred
+        // Also use topological order because it is not guaranteed in
+        // instr_dupes
+        auto get_updated_val = [&](Value *val, unsigned pred) -> Value* {
+          unsigned max = 0;
+          Value *updated_val = val;
+          for (auto &[decl_bb, duped_val] : instr_dupes[val]) {
+            auto t_order = top_order_idx[decl_bb];
+            if (t_order >= max && is_ancestor(decl_bb, pred)) {
+              updated_val = duped_val;
+              max = t_order;
+            }
+          }
+          return updated_val;
+        };
 
         // check if necessary to add phi instructions
         for (auto bb : bbs_top_order) {
@@ -1587,6 +1604,7 @@ next_duped_instr:;
           // phi entries
           for (auto &instr : merge_data.bb->instrs()) {
             if (auto phi = dynamic_cast<Phi*>(const_cast<Instr*>(&instr))) {
+              seen_phi.insert(phi);
               // remove entries that are no longer predecessors
               unordered_set<unsigned> preds;
               // bb -> (value, removed)
@@ -1621,21 +1639,8 @@ next_duped_instr:;
                   phi->addValue(*val, move(name));
                   continue;
                 }
-
-                // Get the most recently duped value between all preds for val
-                // Also use topological order because it is not guaranteed in
-                // instr_dupes
-                unsigned max = 0;
-                Value *updated_val = val;
-                for (auto &[decl_bb, duped_val] : instr_dupes[val]) {
-                  auto t_order = top_order_idx[decl_bb];
-                  if (t_order >= max && is_ancestor(decl_bb, pred.second)) {
-                    updated_val = duped_val;
-                    max = t_order;
-                  }
-                }
                 auto name = lt.node_data[pred.second].bb->getName();
-                phi->addValue(*updated_val, move(name));
+                phi->addValue(*get_updated_val(val, pred.second), move(name));
               }
             } else {
               break;
@@ -1652,7 +1657,17 @@ next_duped_instr:;
 
             for (auto II = its.first, E = its.second; II != E;) {
               auto instr = (Instr*) II->second;
-              if (dynamic_cast<Phi*>(instr)) {
+
+              // check if existing phi has values to update
+              if (auto phi = dynamic_cast<Phi*>(instr)) {
+                if (!seen_phi.count(phi)) {
+                  for (auto &[val, bb_name] : phi->getValues()) {
+                    if (dynamic_cast<Constant*>(val))
+                      continue;
+                    auto pred_id = lt.bb_map[&fn->getBB(bb_name)];
+                    phi->rauw(*val, *get_updated_val(val, pred_id));
+                  }
+                }
                 ++II;
                 continue;
               }
