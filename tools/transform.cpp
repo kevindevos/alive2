@@ -1583,9 +1583,10 @@ void Transform::preprocess(unsigned unroll_factor) {
 
                   added_phi.insert(val);
                   auto &sfx = unroll_data[merge].suffix;
+                  auto &bb_name = lt.node_data[merge].bb->getName();
                   auto phi = make_unique<Phi>(val->getType(),
                                               I->first->getName() + sfx +
-                                              "_phi");
+                                              "_phi_" + bb_name);
                   auto &phi_ = to_insert.emplace_back(move(phi));
                   unroll_data[merge].dupes.emplace_front(val, &(*phi_));
                   phi_use[&(*phi_)] = val;
