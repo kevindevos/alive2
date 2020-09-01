@@ -1271,13 +1271,19 @@ void Transform::preprocess(unsigned unroll_factor) {
           auto &succs = lt.node_data[src].succs;
           for (auto &[succ, data] : succs) {
             if (data.first == cond) {
+              // erase this from old successor's predecessors
+              auto &preds = lt.node_data[succ].preds;
+              for (auto I = preds.begin(), E = preds.end(); I != E; ++I) {
+                if (I->second == src) {
+                  preds.erase(I);
+                  break;
+                }
+              }
               data.second = to_sink;
               auto node_handler = succs.extract(succ);
               node_handler.key() = dst;
               node_handler.mapped().second = to_sink;
               succs.insert(move(node_handler));
-              // TODO erase src from old_succ.preds without iterator
-              // invalidation
               break;
             }
           }
