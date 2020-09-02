@@ -1242,9 +1242,10 @@ void Transform::preprocess(unsigned unroll_factor) {
         return false;
       };
 
-
       auto add_edge = [&](Value *cond, unsigned src, unsigned dst, bool replace,
-                          bool to_sink) {
+                          bool to_sink) -> optional<pair<unsigned,unsigned>> {
+        // dst <- src
+        optional<pair<unsigned, unsigned>> pred_to_erase;
         auto &src_data = lt.node_data[src];
         auto &dst_data = lt.node_data[dst];
         auto instr = (JumpInstr*) &src_data.bb->back();
@@ -1255,14 +1256,7 @@ void Transform::preprocess(unsigned unroll_factor) {
           auto &succs = lt.node_data[src].succs;
           for (auto &[succ, data] : succs) {
             if (data.first == cond) {
-              // erase this from old successor's predecessors
-              auto &preds = lt.node_data[succ].preds;
-              for (auto I = preds.begin(), E = preds.end(); I != E; ++I) {
-                if (I->second == src) {
-                  preds.erase(I);
-                  break;
-                }
-              }
+              pred_to_erase = make_pair(succ, src);
               data.second = to_sink;
               auto node_handler = succs.extract(succ);
               node_handler.key() = dst;
@@ -1297,6 +1291,7 @@ void Transform::preprocess(unsigned unroll_factor) {
               mie = non_sink_preds >= 2 && !has_phi;
           }
         }
+        return pred_to_erase;
       };
 
       // check if a node has exit edges - pointing outside the loop
@@ -1371,9 +1366,21 @@ void Transform::preprocess(unsigned unroll_factor) {
               break;
             optional<unsigned> n_ = duplicate_header(loop);
 
-            for (auto &[c, pred] : lt.node_data[loop].preds) {
+            vector<pair<unsigned, unsigned>> preds_to_remove;
+            for (auto &[c, pred] : lt.node_data[loop].preds)
               if (in_loop(pred, loop))
-                add_edge(c, pred, *n_, true, false);
+                if (auto to_erase = add_edge(c, pred, *n_, true, false))
+                  preds_to_remove.emplace_back(*to_erase);
+
+            // remove preds from replaced edges outside pred iteration
+            for (auto [dst, pred] : preds_to_remove) {
+              auto &preds = lt.node_data[dst].preds;
+              for (auto I = preds.begin(), E = preds.end(); I != E; ++I) {
+                if (I->second == pred) {
+                  preds.erase(I);
+                  break;
+                }
+              }
             }
 
             for (auto &[dst, data] : lt.node_data[loop].succs) {
