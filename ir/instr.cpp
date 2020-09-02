@@ -2051,12 +2051,8 @@ void Switch::addTarget(Value &val, BasicBlock &target) {
 }
 
 void Switch::setTarget(Value *val, BasicBlock &target, unsigned i) {
-  if (i == 0) {
-    setDefaultTarget(val, target);
-  } else {
-    targets[i-1].first = val;
-    targets[i-1].second = &target;
-  }
+  targets[i].first = val;
+  targets[i].second = &target;
 }
 
 void Switch::clearTargets() {
