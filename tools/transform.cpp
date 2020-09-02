@@ -1518,6 +1518,18 @@ void Transform::preprocess(unsigned unroll_factor) {
         auto users = fn->getUsers();
         unordered_set<Phi*> seen_phi;
 
+
+        auto use_before_decl = [&](Value *use, Value *decl, BasicBlock *bb)
+                               -> bool {
+          for (auto &instr : bb->instrs()) {
+            if (&instr == decl)
+              return false;
+            if (&instr == use)
+              return true;
+          }
+          return false;
+        };
+
         // Get the most recently duped value given a value and the pred
         // Also use topological order because it is not guaranteed in
         // instr_dupes
@@ -1681,18 +1693,8 @@ next_duped_instr:;
                 // if same bb, verify use comes after declaration
                 auto what = II->first;
                 auto with = (Value*) i_dupe.second;
-                bool use_before_decl = false;
-                if (bb == c_bb_id) {
-                  for (auto &instr : containing_bb->instrs()) {
-                    if (&instr == with)
-                      break;
-                    if (&instr == what) {
-                      use_before_decl = true;
-                      break;
-                    }
-                  }
-                }
-                if (!use_before_decl) {
+                auto bb_ = lt.node_data[bb].bb;
+                if (bb != c_bb_id || !use_before_decl(what, with, bb_)) {
                   instr->rauw(*what, *with);
                   users.erase(II++);
                   erased = true;
