@@ -999,7 +999,44 @@ static map<string_view, Instr*> can_remove_init(Function &fn) {
   return to_remove;
 }
 
+static void remove_unreachable_bbs(Function &f) {
+  vector<BasicBlock*> wl = { &f.getFirstBB() };
+  set<BasicBlock*> reachable;
+
+  do {
+    auto bb = wl.back();
+    wl.pop_back();
+    if (!reachable.emplace(bb).second)
+      continue;
+
+    if (auto instr = dynamic_cast<JumpInstr*>(&bb->back())) {
+      for (auto &target : instr->targets()) {
+        wl.emplace_back(const_cast<BasicBlock*>(&target));
+      }
+    }
+  } while (!wl.empty());
+
+  auto all_bbs = f.getBBs(); // copy intended
+  vector<string> unreachable;
+  for (auto bb : all_bbs) {
+    if (!reachable.count(bb)) {
+      unreachable.emplace_back(bb->getName());
+      f.removeBB(*bb);
+    }
+  }
+
+  for (auto &i : f.instrs()) {
+    if (auto phi = dynamic_cast<const Phi*>(&i)) {
+      for (auto &bb : unreachable) {
+        const_cast<Phi*>(phi)->removeValue(bb);
+      }
+    }
+  }
+}
+
 void Transform::preprocess(unsigned unroll_factor) {
+  remove_unreachable_bbs(src);
+  remove_unreachable_bbs(tgt);
   // remove store of initializers to global variables that aren't needed to
   // verify the transformation
   // We only remove inits if it's possible to remove from both programs to keep
@@ -1038,59 +1075,6 @@ void Transform::preprocess(unsigned unroll_factor) {
 
       changed |= fn->removeUnusedStuff(users);
     } while (changed);
-  }
-
-  // remove BBs not reachable from entry
-  for (auto fn : { &src, &tgt }) {
-    unordered_map<const BasicBlock*, bool> visited;
-    vector<const BasicBlock*> visited_bbs;
-    auto &entry = fn->getFirstBB();
-    visited_bbs.push_back(&entry);
-
-    // DFS to find reachable BBs
-    unsigned size = visited_bbs.size();
-    for (unsigned i = 0; i < size; ++i) {
-      auto &bb = visited_bbs[i];
-      auto &vis = visited[bb];
-      if (vis)
-        continue;
-      vis = true;
-
-      if (auto instr = dynamic_cast<const JumpInstr*>(&bb->back())) {
-        auto tgt_it = const_cast<JumpInstr*>(instr)->targets();
-        for (auto I = tgt_it.begin(), E = tgt_it.end(); I != E; ++I) {
-          visited_bbs.push_back(&(*I));
-          ++size;
-        }
-      }
-    }
-
-    // check if any bb was not reached before finding them
-    vector<BasicBlock*> to_remove;
-    if (visited.size() != fn->getBBs().size()) {
-      for (auto bb : fn->getBBs()) {
-        if (!visited[bb]) {
-          // remove bb from phi instrs in its sucessors
-          if (auto instr = dynamic_cast<JumpInstr*>(&bb->back())) {
-            auto tgt_it = instr->targets();
-            for (auto I = tgt_it.begin(), E = tgt_it.end(); I != E; ++I) {
-              for (auto &instr : (*I).instrs()) {
-                if (auto phi = dynamic_cast<const Phi*>(&instr))
-                  const_cast<Phi&>(*phi).removeValue(bb->getName());
-                else
-                  break;
-              }
-            }
-          }
-          // delay removal until all phi's were processed
-          to_remove.push_back(bb);
-        }
-      }
-      // remove unreachable blocks
-      for (auto bb : to_remove) {
-        fn->removeBB(*bb);
-      }
-    }
   }
 
   auto k = unroll_factor;
