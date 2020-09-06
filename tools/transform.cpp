@@ -1112,9 +1112,6 @@ void Transform::preprocess(unsigned unroll_factor) {
       vector<UnrollNodeData> unroll_data;
       unsigned cur_loop; // current loop being unrolled
       optional<unsigned> prev_loop; // loop unrolled before current
-      // keep nodes that are inconsistent with topological order for fixing
-      // after each loop unroll
-      optional<unsigned> last_duped_header;
       unsigned num_duped_bbs = 0;
       optional<BasicBlock*> sink;
 
@@ -1173,7 +1170,7 @@ void Transform::preprocess(unsigned unroll_factor) {
 
         // manually dupe instrs and update instr_dupes and unroll_data.dupes
         for (auto &i : bb_first_orig->instrs()) {
-          ins_bb->addInstr(move(i.dup(suffix)));
+          ins_bb->addInstr(i.dup(suffix));
           auto i_val = (Value*) &i;
 
           // TODO does alive support invoke? only terminator instr that does not
