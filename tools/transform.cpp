@@ -1531,13 +1531,17 @@ void Transform::preprocess(unsigned unroll_factor) {
         // Get the most recently duped value given a value and the pred
         // Also use topological order because it is not guaranteed in
         // instr_dupes
-        auto get_updated_val = [&](Value *val, unsigned pred) -> Value* {
+        auto get_updated_val = [&](Value *val, unsigned pred, Value *use)
+                               -> Value* {
           Value *updated_val = val;
-          for (auto &[decl_bb, duped_val] : instr_dupes[val])
-            if (is_ancestor(decl_bb, pred))
+          for (auto &[decl_bb, duped_val] : instr_dupes[val]) {
+            auto bb = lt.node_data[pred].bb;
+            if (is_ancestor(decl_bb, pred) &&
+                use_before_decl(use, duped_val, bb))
               updated_val = duped_val;
             else
               break;
+          }
 
           return updated_val;
         };
@@ -1663,7 +1667,8 @@ next_duped_instr:;
                   continue;
                 }
                 auto name = lt.node_data[pred.second].bb->getName();
-                phi->addValue(*get_updated_val(val, pred.second), move(name));
+                phi->addValue(*get_updated_val(val, pred.second, phi),
+                              move(name));
               }
             } else {
               break;
@@ -1688,7 +1693,7 @@ next_duped_instr:;
                     if (dynamic_cast<Constant*>(val))
                       continue;
                     auto pred_id = lt.bb_map[&fn->getBB(bb_name)];
-                    phi->rauw(*val, *get_updated_val(val, pred_id));
+                    phi->rauw(*val, *get_updated_val(val, pred_id, phi));
                   }
                 }
                 ++II;
