@@ -1565,18 +1565,21 @@ void Transform::preprocess(unsigned unroll_factor) {
               auto top_order = top_order_idx[pred.second];
               if (top_order < min)
                 min = top_order;
-              if (top_order >= max)
+              if (top_order > max)
                 max = top_order;
             }
 
             // add phi's to merge for uses that have different values between
             // preds
             unordered_set<Value*> added_phi;
+            auto first = bbs_top_order[min];
             for (auto i = min + 1; i <= max; ++i) {
               auto bb = bbs_top_order[i];
               // do not consider merge for checking dupes if merge is its own
               // predecessor
               if (bb == merge)
+                continue;
+              if (!is_ancestor(first, bb) || is_ancestor(merge, bb))
                 continue;
               for (auto dupe : unroll_data[bb].dupes) {
                 auto val = dupe.first;
