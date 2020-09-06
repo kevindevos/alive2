@@ -1168,19 +1168,8 @@ void Transform::preprocess(unsigned unroll_factor) {
         auto id = lt.node_data.size();
         lt.bb_map[ins_bb] = id;
 
-        // manually dupe instrs and update instr_dupes and unroll_data.dupes
-        for (auto &i : bb_first_orig->instrs()) {
-          ins_bb->addInstr(i.dup(suffix));
-          auto i_val = (Value*) &i;
-
-          // TODO does alive support invoke? only terminator instr that does not
-          // return 'void' value
-          // do not store dupes of instrs that just return 'void'
-          if (&i != &bb_first_orig->back()) {
-            instr_dupes[i_val].emplace_back(id, &ins_bb->back());
-            unroll_data[id].dupes.emplace_back(i_val, &ins_bb->back());
-          }
-        }
+        // dupe only back instr
+        ins_bb->addInstr(bb_first_orig->back().dup(suffix));
         unroll_data[id].suffix = move(suffix);
 
         lt.node_data.emplace_back();
@@ -1468,9 +1457,30 @@ void Transform::preprocess(unsigned unroll_factor) {
         bbs.clear();
         for (auto I = sorted.rbegin(), E = sorted.rend(); I != E; ++I) {
           auto id = *I;
-          bbs.emplace_back(lt.node_data[id].bb);
+          auto bb = lt.node_data[id].bb;
+          bbs.emplace_back(bb);
           top_order_idx[id] = bbs_top_order.size();
           bbs_top_order.emplace_back(id);
+
+          // dupe instrs so they appear in instr_dupes in bb topological order
+          // only for duped bbs
+          if (unroll_data[id].first_original != id) {
+            auto orig_bb = lt.node_data[unroll_data[id].first_original].bb;
+            auto back_instr = bb->delInstr(&bb->back());
+            auto &suffix = unroll_data[id].suffix;
+            for (auto &i : orig_bb->instrs()) {
+              if (&i != &orig_bb->back()) {
+                bb->addInstr(i.dup(suffix));
+                auto i_val = (Value*) &i;
+                instr_dupes[i_val].emplace_back(id, &bb->back());
+                unroll_data[id].dupes.emplace_back(i_val, &bb->back());
+              }
+            }
+
+            // append previously extracted instr
+            bb->addInstr(move(back_instr));
+          }
+
         }
 
         // check if bb1 is ancestor of bb2 through transitive closure of bb1
@@ -1522,15 +1532,13 @@ void Transform::preprocess(unsigned unroll_factor) {
         // Also use topological order because it is not guaranteed in
         // instr_dupes
         auto get_updated_val = [&](Value *val, unsigned pred) -> Value* {
-          unsigned max = 0;
           Value *updated_val = val;
-          for (auto &[decl_bb, duped_val] : instr_dupes[val]) {
-            auto t_order = top_order_idx[decl_bb];
-            if (t_order >= max && is_ancestor(decl_bb, pred)) {
+          for (auto &[decl_bb, duped_val] : instr_dupes[val])
+            if (is_ancestor(decl_bb, pred))
               updated_val = duped_val;
-              max = t_order;
-            }
-          }
+            else
+              break;
+
           return updated_val;
         };
 
@@ -1590,7 +1598,21 @@ void Transform::preprocess(unsigned unroll_factor) {
                   auto &phi_ = to_insert.emplace_back(move(phi));
                   unroll_data[merge].dupes.emplace_front(val, &(*phi_));
                   phi_use[&(*phi_)] = val;
-                  instr_dupes[val].emplace_front(merge, &(*phi_));
+
+                  // insert phi in correct position w.r.t topological order
+                  auto &i_dupes = instr_dupes[val];
+                  auto toporder = top_order_idx[merge];
+                  bool added = false;
+                  for (auto II = i_dupes.begin(), EE = i_dupes.end(); II != EE;
+                       ++II) {
+                    if (top_order_idx[II->first] > toporder) {
+                      i_dupes.emplace(II, merge, &(*phi_));
+                      added = true;
+                      break;
+                    }
+                  }
+                  if (!added)
+                    i_dupes.emplace_back(merge, &(*phi_));
                   users.emplace(I->first, &(*phi_));
                   break;
                 }

@@ -39,7 +39,7 @@ public:
 
   void addInstr(std::unique_ptr<Instr> &&i);
   void addInstrFront(std::unique_ptr<Instr> &&i);
-  void delInstr(Instr *i);
+  std::unique_ptr<Instr> delInstr(Instr *i);
 
   util::const_strip_unique_ptr<decltype(m_instrs)> instrs() const {
     return m_instrs;

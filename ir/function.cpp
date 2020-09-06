@@ -40,14 +40,16 @@ void BasicBlock::addInstrFront(unique_ptr<Instr> &&i) {
 }
 
 
-void BasicBlock::delInstr(Instr *i) {
+unique_ptr<Instr> BasicBlock::delInstr(Instr *i) {
+  unique_ptr<Instr> ret;
   for (auto I = m_instrs.begin(), E = m_instrs.end(); I != E; ++I) {
-    if (I->get() == i) {
+    if (&(**I) == i) {
       i->containingBB().reset();
+      ret = move(*I);
       m_instrs.erase(I);
-      return;
     }
   }
+  return ret;
 }
 
 unique_ptr<BasicBlock> BasicBlock::dup(const string &suffix,
