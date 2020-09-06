@@ -1574,6 +1574,10 @@ void Transform::preprocess(unsigned unroll_factor) {
             unordered_set<Value*> added_phi;
             for (auto i = min + 1; i <= max; ++i) {
               auto bb = bbs_top_order[i];
+              // do not consider merge for checking dupes if merge is its own
+              // predecessor
+              if (bb == merge)
+                continue;
               for (auto dupe : unroll_data[bb].dupes) {
                 auto val = dupe.first;
                 if (added_phi.count(val))
