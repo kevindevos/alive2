@@ -1572,7 +1572,7 @@ void Transform::preprocess(unsigned unroll_factor) {
             // add phi's to merge for uses that have different values between
             // preds
             unordered_set<Value*> added_phi;
-            for (auto i = min; i <= max; ++i) {
+            for (auto i = min + 1; i <= max; ++i) {
               auto bb = bbs_top_order[i];
               for (auto dupe : unroll_data[bb].dupes) {
                 auto val = dupe.first;
