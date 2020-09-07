@@ -1594,6 +1594,15 @@ void Transform::preprocess(unsigned unroll_factor) {
                   // if use does not come after merge skip
                   if (!is_ancestor(merge, cbbid))
                     continue;
+
+                  // if exists dupe in a bb after merge and before use, skip
+                  for (auto &[dupe_bb, duped_val] : instr_dupes[val]) {
+                    auto dupe_bb_ = lt.node_data[dupe_bb].bb;
+                    if (is_ancestor(dupe_bb, cbbid) && (cbbid != dupe_bb ||
+                        !use_before_decl(val, duped_val, dupe_bb_)))
+                      goto next_duped_instr;
+                  }
+
                   // if variable not declared yet before or at some pred, skip
                   for (auto pred : merge_data.preds)
                     if (pred.second != orig_cbbid &&
@@ -1611,9 +1620,9 @@ void Transform::preprocess(unsigned unroll_factor) {
                   phi_use[&(*phi_)] = val;
 
                   // insert phi in correct position w.r.t topological order
-                  auto &i_dupes = instr_dupes[val];
                   auto toporder = top_order_idx[merge];
                   bool added = false;
+                  auto &i_dupes = instr_dupes[val];
                   for (auto II = i_dupes.begin(), EE = i_dupes.end(); II != EE;
                        ++II) {
                     if (top_order_idx[II->first] > toporder) {
