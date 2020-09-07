@@ -1529,20 +1529,19 @@ void Transform::preprocess(unsigned unroll_factor) {
         };
 
         // Get the most recently duped value given a value and the pred
-        // Also use topological order because it is not guaranteed in
-        // instr_dupes
         auto get_updated_val = [&](Value *val, unsigned pred, Value *use)
                                -> Value* {
           Value *updated_val = val;
-          for (auto &[decl_bb, duped_val] : instr_dupes[val]) {
+          auto &idupes = instr_dupes[val];
+          for (auto I = idupes.rbegin(), E = idupes.rend(); I != E; ++I) {
+            auto &[decl_bb, duped_val] = *I;
             auto bb = lt.node_data[pred].bb;
             if (is_ancestor(decl_bb, pred) &&
-                (decl_bb != pred || !use_before_decl(use, duped_val, bb)))
+                (decl_bb != pred || !use_before_decl(use, duped_val, bb))) {
               updated_val = duped_val;
-            else
               break;
+            }
           }
-
           return updated_val;
         };
 
