@@ -1537,7 +1537,7 @@ void Transform::preprocess(unsigned unroll_factor) {
           for (auto &[decl_bb, duped_val] : instr_dupes[val]) {
             auto bb = lt.node_data[pred].bb;
             if (is_ancestor(decl_bb, pred) &&
-                use_before_decl(use, duped_val, bb))
+                (decl_bb != pred || !use_before_decl(use, duped_val, bb)))
               updated_val = duped_val;
             else
               break;
