@@ -1590,6 +1590,14 @@ void Transform::preprocess(unsigned unroll_factor) {
                   auto cbbid = lt.bb_map[*((Instr*) I->second)->containingBB()];
                   auto orig_cbbid = lt.bb_map[*((Instr*) val)->containingBB()];
 
+                  // if use in merge and already in an pre-existing phi skip
+                  // since it is already being distinguished between preds
+                  // no need for a phi exists here
+                  if (cbbid == merge)
+                    if (auto phi = dynamic_cast<Phi*>(I->second))
+                      if (!added_phi.count(phi))
+                        break;
+
                   // if use does not come after merge skip
                   if (!is_ancestor(merge, cbbid))
                     continue;
@@ -1608,6 +1616,7 @@ void Transform::preprocess(unsigned unroll_factor) {
                     if (pred.second != orig_cbbid &&
                         is_ancestor(pred.second, orig_cbbid))
                       goto next_duped_instr;
+
 
                   added_phi.insert(val);
                   auto &sfx = unroll_data[merge].suffix;
