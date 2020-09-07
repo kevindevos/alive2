@@ -425,7 +425,7 @@ void LoopTree::buildLoopTree() {
       t_data.preds.emplace_back(c, pred);
       // set back-edge flag to false for now, update later with DFS and
       // isAncestor
-      node_data[pred].succs.emplace(t_n, std::make_pair(c, false));
+      node_data[pred].succs.emplace_back(t_n, c, false);
     };
 
     while (!dfs_work_list.empty()) {
@@ -551,7 +551,7 @@ void LoopTree::buildLoopTree() {
         }
 
         for (auto &succ : lnode_data.succs) {
-          if (vecsetFind(succ.first) != w)
+          if (vecsetFind(get<0>(succ)) != w)
             has_out_exit = true; // (lnode, x) : x not in loop
           else
             has_in_exit = true; // (lnode, x) : x in loop
@@ -602,9 +602,10 @@ void LoopTree::buildLoopTree() {
 
     if (!visited[cur]) {
       visited[cur] = true;
-      for (auto &succ : node_data[cur].succs) {
-        work_list.push(succ.first);
-        succ.second.second = isAncestor(number[succ.first], number[cur]);
+      for (auto &[dst, val, back_edge] : node_data[cur].succs) {
+        (void)val;
+        work_list.push(dst);
+        back_edge = isAncestor(number[dst], number[cur]);
       }
     }
   }

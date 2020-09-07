@@ -17,6 +17,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+#include <list>
 
 namespace smt { class Model; }
 
@@ -206,7 +207,7 @@ public:
     unsigned id;
     BasicBlock *bb;
     std::vector<std::pair<Value*, unsigned>> preds;
-    std::unordered_map<unsigned, std::pair<Value*, bool>> succs;
+    std::list<std::tuple<unsigned, Value*, bool>> succs;
     std::vector<unsigned> non_back_preds;
     std::vector<unsigned> back_preds;
     std::vector<unsigned> red_back_in;
