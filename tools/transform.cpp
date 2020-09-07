@@ -1597,7 +1597,8 @@ void Transform::preprocess(unsigned unroll_factor) {
                   // if exists dupe in a bb after merge and before use, skip
                   for (auto &[dupe_bb, duped_val] : instr_dupes[val]) {
                     auto dupe_bb_ = lt.node_data[dupe_bb].bb;
-                    if (is_ancestor(dupe_bb, cbbid) && (cbbid != dupe_bb ||
+                    if (is_ancestor(merge, dupe_bb) &&
+                        is_ancestor(dupe_bb, cbbid) && (cbbid != dupe_bb ||
                         !use_before_decl(val, duped_val, dupe_bb_)))
                       goto next_duped_instr;
                   }
