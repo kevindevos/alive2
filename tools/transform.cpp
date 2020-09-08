@@ -1618,7 +1618,7 @@ void Transform::preprocess(unsigned unroll_factor) {
                   // if variable not declared yet before or at some pred, skip
                   for (auto pred : merge_data.preds)
                     if (pred.second != orig_cbbid &&
-                        is_ancestor(pred.second, orig_cbbid))
+                        !is_ancestor(orig_cbbid, pred.second))
                       goto next_duped_instr;
 
 
