@@ -315,6 +315,7 @@ public:
 
   void addValue(Value &val, std::string &&BB_name);
   void removeValue(const std::string &BB_name);
+  void replaceLabels(const std::string &what, const std::string &with);
 
   std::vector<std::pair<Value*, std::string>> getValues();
   std::vector<Value*> operands() const override;

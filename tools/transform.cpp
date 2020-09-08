@@ -1077,6 +1077,33 @@ void Transform::preprocess(unsigned unroll_factor) {
     } while (changed);
   }
 
+  // create empty body for single node loops
+  for (auto fn : { &src, &tgt }) {
+    for (auto bb : fn->getBBs()) {
+      if (auto jmp = dynamic_cast<JumpInstr*>(&bb->back())) {
+        auto tgt_it = jmp->targets();
+        for (auto I = tgt_it.begin(), E = tgt_it.end(); I != E; ++I) {
+          auto [cond, tgt] = I.get();
+          if (&tgt == bb) {
+            auto body = make_unique<BasicBlock>(bb->getName() + "_#body");
+            // update phi
+            for (auto &instr : bb->instrs())
+              if (auto phi = dynamic_cast<Phi*>(const_cast<Instr*>(&instr)))
+                phi->replaceLabels(bb->getName(), body->getName());
+              else
+                break;
+
+            body->addInstr(make_unique<Branch>(*bb));
+            fn->addBB(move(*body));
+            // TODO - how to change tgt without replaceTarget?
+            jmp->replaceTarget(cond, *fn->getBBs().back());
+            break;
+          }
+        }
+      }
+    }
+  }
+
   auto k = unroll_factor;
   k = 2;
 

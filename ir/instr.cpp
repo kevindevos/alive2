@@ -1798,6 +1798,12 @@ void Phi::removeValue(const std::string &BB_name) {
   }
 }
 
+void Phi::replaceLabels(const std::string &what, const std::string &with) {
+  for (auto &[val, bb] : values)
+    if (bb == what)
+      bb = with;
+}
+
 vector<pair<Value*, string>> Phi::getValues() {
   vector<pair<Value*, string>> v;
   for (auto &[val, bb] : values)
