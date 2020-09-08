@@ -1295,7 +1295,10 @@ void Transform::preprocess(unsigned unroll_factor) {
         // keep edge for checking phi entries
         auto non_sink_preds = dst_data.preds.size() - num_preds_sink;
         if (!to_sink) {
-          bool has_phi = dynamic_cast<Phi*>(&dst_data.bb->front());
+          // Use first orig bb to check for existence of Phi instrs since the
+          // instrs for duped bb's are only inserted during topsort
+          auto &orig_data = lt.node_data[unroll_data[dst].first_original];
+          bool has_phi = dynamic_cast<Phi*>(&orig_data.bb->front());
           if (non_sink_preds > 1 || has_phi) {
             auto &mie = merge_in_edges[dst];
             if (!mie)
