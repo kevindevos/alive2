@@ -1084,7 +1084,7 @@ void Transform::preprocess(unsigned unroll_factor) {
         auto tgt_it = jmp->targets();
         for (auto I = tgt_it.begin(), E = tgt_it.end(); I != E; ++I) {
           auto [cond, tgt] = I.get();
-          if (&tgt == bb) {
+          if (tgt == bb) {
             auto body = make_unique<BasicBlock>(bb->getName() + "_#body");
             // update phi
             for (auto &instr : bb->instrs())
@@ -1095,9 +1095,7 @@ void Transform::preprocess(unsigned unroll_factor) {
 
             body->addInstr(make_unique<Branch>(*bb));
             fn->addBB(move(*body));
-            // TODO - how to change tgt without replaceTarget?
-            jmp->replaceTarget(cond, *fn->getBBs().back());
-            break;
+            tgt = &(*fn->getBBs().back());
           }
         }
       }

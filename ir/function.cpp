@@ -450,7 +450,7 @@ void LoopTree::buildLoopTree() {
             auto tgt_it = const_cast<JumpInstr*>(instr)->targets();
             for (auto I = tgt_it.begin(), E = tgt_it.end(); I != E; ++I) {
               auto [cond, bb] = I.get();
-              try_push_worklist(&bb, n, cond);
+              try_push_worklist(bb, n, cond);
             }
           }
         } else {

@@ -338,7 +338,7 @@ public:
     target_iterator() {}
     target_iterator(JumpInstr *instr, unsigned idx) : instr(instr), idx(idx) {}
     const BasicBlock& operator*() const;
-    std::pair<Value*, const BasicBlock&> get() const;
+    std::pair<Value*, BasicBlock*&> get();
     target_iterator& operator++(void) { ++idx; return *this; }
     bool operator!=(target_iterator &rhs) const { return idx != rhs.idx; }
     bool operator==(target_iterator &rhs) const { return !(*this != rhs); }
@@ -368,8 +368,8 @@ public:
     : JumpInstr(Type::voidTy, "br"), cond(&cond), dst_true(&dst_true),
     dst_false(&dst_false) {}
 
-  auto getTrue() { return dst_true; }
-  auto getFalse() { return dst_false; }
+  auto& getTrue() { return dst_true; }
+  auto& getFalse() { return dst_false; }
   void setTrue(Value *val, BasicBlock &target);
   void setFalse(BasicBlock &target);
   auto getCond() { return cond; }
@@ -399,8 +399,8 @@ public:
   void setTarget(Value *val, BasicBlock &target, unsigned i);
   void clearTargets();
   auto getNumTargets() const { return targets.size(); }
-  auto& getTarget(unsigned i) const { return targets[i]; }
-  auto getDefault() const { return default_target; }
+  auto& getTarget(unsigned i) { return targets[i]; }
+  auto& getDefault() { return default_target; }
   auto getDefaultValue() const { return value; }
 
   std::vector<Value*> operands() const override;

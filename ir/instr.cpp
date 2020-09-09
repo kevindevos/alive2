@@ -1883,20 +1883,20 @@ const BasicBlock& JumpInstr::target_iterator::operator*() const {
   UNREACHABLE();
 }
 
-pair<Value*, const BasicBlock&> JumpInstr::target_iterator::get() const {
+pair<Value*, BasicBlock*&> JumpInstr::target_iterator::get() {
   if (auto br = dynamic_cast<Branch*>(instr)) {
     if (idx == 0)
-      return { br->getCond(), *br->getTrue() };
+      return { br->getCond(), br->getTrue() };
     else
-      return { nullptr, *br->getFalse() };
+      return { nullptr, br->getFalse() };
   }
 
   if (auto sw = dynamic_cast<Switch*>(instr)) {
     if (idx == 0) {
-      return { sw->getDefaultValue(), *sw->getDefault() };
+      return { sw->getDefaultValue(), sw->getDefault() };
     } else {
-      auto tgt = sw->getTarget(idx-1);
-      return { tgt.first,  *tgt.second };
+      auto &tgt = sw->getTarget(idx-1);
+      return { tgt.first, tgt.second };
     }
   }
 
