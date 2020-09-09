@@ -1077,36 +1077,6 @@ void Transform::preprocess(unsigned unroll_factor) {
     } while (changed);
   }
 
-  // create empty body for single node loops
-  for (auto fn : { &src, &tgt }) {
-    for (auto bb : fn->getBBs()) {
-      bool created_body = false;
-      if (auto jmp = dynamic_cast<JumpInstr*>(&bb->back())) {
-        auto tgt_it = jmp->targets();
-        for (auto I = tgt_it.begin(), E = tgt_it.end(); I != E; ++I) {
-          auto [cond, tgt] = I.get();
-          if (tgt == bb) {
-            if (!created_body) {
-              auto body = make_unique<BasicBlock>(bb->getName() + "_#body");
-              body->addInstr(make_unique<Branch>(*bb));
-              // update phi
-              for (auto &instr : bb->instrs())
-                if (auto phi = dynamic_cast<Phi*>(const_cast<Instr*>(&instr)))
-                  phi->replaceLabels(bb->getName(), body->getName());
-                else
-                  break;
-
-              fn->addBB(move(*body));
-              created_body = true;
-            }
-            if (created_body)
-              tgt = &(*fn->getBBs().back());
-          }
-        }
-      }
-    }
-  }
-
   auto k = unroll_factor;
   k = 2;
 
@@ -1130,6 +1100,36 @@ void Transform::preprocess(unsigned unroll_factor) {
   };
 
   if (k > 0) {
+    // create empty body for single node loops
+    for (auto fn : { &src, &tgt }) {
+      for (auto bb : fn->getBBs()) {
+        bool created_body = false;
+        if (auto jmp = dynamic_cast<JumpInstr*>(&bb->back())) {
+          auto tgt_it = jmp->targets();
+          for (auto I = tgt_it.begin(), E = tgt_it.end(); I != E; ++I) {
+            auto [cond, tgt] = I.get();
+            if (tgt == bb) {
+              if (!created_body) {
+                auto body = make_unique<BasicBlock>(bb->getName() + "_#body");
+                body->addInstr(make_unique<Branch>(*bb));
+                // update phi
+                for (auto &instr : bb->instrs())
+                  if (auto phi = dynamic_cast<Phi*>(const_cast<Instr*>(&instr)))
+                    phi->replaceLabels(bb->getName(), body->getName());
+                  else
+                    break;
+
+                fn->addBB(move(*body));
+                created_body = true;
+              }
+              if (created_body)
+                tgt = &(*fn->getBBs().back());
+            }
+          }
+        }
+      }
+    }
+
     // Loop unrolling
     for (auto fn : { &src, &tgt }) {
       CFG cfg(*fn);
