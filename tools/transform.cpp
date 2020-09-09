@@ -1080,22 +1080,27 @@ void Transform::preprocess(unsigned unroll_factor) {
   // create empty body for single node loops
   for (auto fn : { &src, &tgt }) {
     for (auto bb : fn->getBBs()) {
+      bool created_body = false;
       if (auto jmp = dynamic_cast<JumpInstr*>(&bb->back())) {
         auto tgt_it = jmp->targets();
         for (auto I = tgt_it.begin(), E = tgt_it.end(); I != E; ++I) {
           auto [cond, tgt] = I.get();
           if (tgt == bb) {
-            auto body = make_unique<BasicBlock>(bb->getName() + "_#body");
-            // update phi
-            for (auto &instr : bb->instrs())
-              if (auto phi = dynamic_cast<Phi*>(const_cast<Instr*>(&instr)))
-                phi->replaceLabels(bb->getName(), body->getName());
-              else
-                break;
+            if (!created_body) {
+              auto body = make_unique<BasicBlock>(bb->getName() + "_#body");
+              body->addInstr(make_unique<Branch>(*bb));
+              // update phi
+              for (auto &instr : bb->instrs())
+                if (auto phi = dynamic_cast<Phi*>(const_cast<Instr*>(&instr)))
+                  phi->replaceLabels(bb->getName(), body->getName());
+                else
+                  break;
 
-            body->addInstr(make_unique<Branch>(*bb));
-            fn->addBB(move(*body));
-            tgt = &(*fn->getBBs().back());
+              fn->addBB(move(*body));
+              created_body = true;
+            }
+            if (created_body)
+              tgt = &(*fn->getBBs().back());
           }
         }
       }
