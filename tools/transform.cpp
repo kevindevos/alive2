@@ -1745,7 +1745,7 @@ next_duped_instr:;
           for (auto &i_dupe : unroll_data[bb].dupes) {
             auto its = users.equal_range(i_dupe.first);
 
-            for (auto II = its.first, E = its.second; II != E;) {
+            for (auto II = its.first, EE = its.second; II != EE;) {
               auto instr = (Instr*) II->second;
 
               // check if existing phi has values to update
