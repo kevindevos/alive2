@@ -1499,8 +1499,7 @@ void Transform::preprocess(unsigned unroll_factor) {
           top_order_idx[id] = bbs_top_order.size();
           bbs_top_order.emplace_back(id);
 
-          // dupe instrs so they appear in instr_dupes in bb topological order
-          // only for duped bbs
+          // instr duping and keep dupes in topological order
           if (unroll_data[id].first_original != id) {
             auto orig_bb = lt.node_data[unroll_data[id].first_original].bb;
             auto back_instr = bb->delInstr(&bb->back());
@@ -1548,12 +1547,6 @@ void Transform::preprocess(unsigned unroll_factor) {
           return found;
         };
 
-        // update phi entries and add phi instructions when necessary
-        unordered_map<Value*, Value*> phi_use;
-        auto users = fn->getUsers();
-        unordered_set<Phi*> seen_phi;
-
-
         auto use_before_decl = [&](Value *use, Value *decl, BasicBlock *bb)
                                -> bool {
           for (auto &instr : bb->instrs()) {
@@ -1581,6 +1574,10 @@ void Transform::preprocess(unsigned unroll_factor) {
           }
           return updated_val;
         };
+
+        unordered_map<Value*, Value*> phi_use;
+        auto users = fn->getUsers();
+        unordered_set<Phi*> seen_phi;
 
         // check if necessary to add phi instructions
         for (auto bb : bbs_top_order) {
