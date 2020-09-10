@@ -310,10 +310,12 @@ void CFG::edge_iterator::next() {
     if (bbi == bbe)
       return;
 
-    if (auto instr = dynamic_cast<JumpInstr*>(&(*bbi)->back())) {
-      ti = instr->targets().begin();
-      te = instr->targets().end();
-      return;
+    if (!(*bbi)->empty()) {
+      if (auto instr = dynamic_cast<JumpInstr*>(&(*bbi)->back())) {
+        ti = instr->targets().begin();
+        te = instr->targets().end();
+        return;
+      }
     }
 
     ++bbi;
