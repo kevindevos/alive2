@@ -1097,6 +1097,10 @@ void Transform::preprocess(unsigned unroll_factor) {
     unsigned num_preds_changed_to_sink;
     // suffix for bb name
     string suffix;
+    // phis and entries to keep track of for operand updates as entries may
+    // be removed but kept track of for reference
+    // phi -> < <value, bbid, removed>
+    unordered_map<Value*, unordered_map<unsigned, pair<Value*, bool>>> phi_ref;
   };
 
   if (k > 0) {
@@ -1500,8 +1504,8 @@ void Transform::preprocess(unsigned unroll_factor) {
           bbs_top_order.emplace_back(id);
 
           // instr duping and keep dupes in topological order
+          auto orig_bb = lt.node_data[unroll_data[id].first_original].bb;
           if (unroll_data[id].first_original != id) {
-            auto orig_bb = lt.node_data[unroll_data[id].first_original].bb;
             auto back_instr = bb->delInstr(&bb->back());
             auto &suffix = unroll_data[id].suffix;
             for (auto &i : orig_bb->instrs()) {
@@ -1517,6 +1521,27 @@ void Transform::preprocess(unsigned unroll_factor) {
             bb->addInstr(move(back_instr));
           }
 
+          auto &phi_ref = unroll_data[id].phi_ref;
+          unordered_set<unsigned> preds;
+          for (auto &p : lt.node_data[id].preds)
+            preds.insert(p.second);
+
+          vector<string> todo;
+          for (auto &i : bb->instrs()) {
+            if (auto phi = dynamic_cast<Phi*>(const_cast<Instr*>(&i))) {
+              auto &phi_entry = phi_ref[phi];
+              for (auto &[val, bb_name] : phi->getValues()) {
+                auto pred_id = lt.bb_map[&fn->getBB(bb_name)];
+                auto to_remove = !preds.count(pred_id);
+                if (to_remove && bb != orig_bb)
+                  todo.emplace_back(bb_name);
+                phi_entry.try_emplace(pred_id, val, to_remove);
+              }
+              for (auto &name : todo)
+                phi->removeValue(name);
+              todo.clear();
+            }
+          }
         }
 
         // check if bb1 is ancestor of bb2 through transitive closure of bb1
@@ -1691,29 +1716,16 @@ next_duped_instr:;
           for (auto &instr : merge_data.bb->instrs()) {
             if (auto phi = dynamic_cast<Phi*>(const_cast<Instr*>(&instr))) {
               seen_phi.insert(phi);
-              // remove entries that are no longer predecessors
-              unordered_set<unsigned> preds;
-              // bb -> (value, removed)
-              unordered_map<unsigned, pair<Value*, bool>> entries;
-              for (auto pred : merge_data.preds)
-                preds.insert(pred.second);
-              for (auto &[val, bb_name] : phi->getValues()) {
-                auto pred = lt.bb_map[&fn->getBB(bb_name)];
-                bool removed = false;
-                if (!preds.count(pred)) {
-                  phi->removeValue(bb_name);
-                  removed = true;
-                }
-                entries.try_emplace(pred, val, removed);
-              }
 
               // add entries
+              auto &entries = unroll_data[merge].phi_ref[phi];
               for (auto &pred : merge_data.preds) {
                 auto orig_pred = unroll_data[pred.second].first_original;
                 auto I = entries.find(orig_pred);
-                if (I != entries.end())
+                if (I != entries.end()) {
                   if (pred.second == orig_pred && !I->second.second)
                     continue;
+                }
 
                 // for created phis grab val from phi_use
                 auto val = entries.empty() ? phi_use[phi] : I->second.first;
