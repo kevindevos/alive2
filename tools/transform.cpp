@@ -1381,7 +1381,7 @@ void Transform::preprocess(unsigned unroll_factor) {
             unroll_data[loop].pre_duped = true;
 
             bool is_last_it = k == 1;
-            if (is_last_it && !has_exits(loop, cur_loop))
+            if (is_last_it && !has_exits(loop, loop))
               break;
             optional<unsigned> n_ = duplicate_header(loop);
 
