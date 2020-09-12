@@ -1621,8 +1621,7 @@ void Transform::preprocess(unsigned unroll_factor) {
         unordered_set<Phi*> seen_phi;
 
         // check if necessary to add phi instructions
-        for (auto bb : bbs_top_order) {
-          auto merge = bb; // naming semantics
+        for (auto merge : bbs_top_order) {
           auto &merge_data = lt.node_data[merge];
           unordered_set<Value*> seen_uses;
           vector<unique_ptr<Phi>> to_insert;
@@ -1666,8 +1665,9 @@ void Transform::preprocess(unsigned unroll_factor) {
                   // no need for a phi exists here
                   if (cbbid == merge)
                     if (auto phi = dynamic_cast<Phi*>(I->second))
-                      if (!added_phi.count(phi))
-                        break;
+                      for (auto op : phi->operands())
+                        if (op == val)
+                          break;
 
                   // if use does not come after merge skip
                   if (!is_ancestor(merge, cbbid))
