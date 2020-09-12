@@ -1152,11 +1152,6 @@ void Transform::preprocess(unsigned unroll_factor) {
       // all dupes and the bb_id they were created for a given instr
       unordered_map<Value*, list<pair<unsigned, Value*>>> instr_dupes;
 
-      // keep edges to merges to check for phis
-      // dst -> <src, became_merge>
-      vector<optional<bool>> merge_in_edges;
-      merge_in_edges.resize(lt.node_data.size());
-
       // Prepare data structure for unroll algorithm
       for (auto node : lt.node_data) {
         unroll_data.emplace_back();
@@ -1182,7 +1177,6 @@ void Transform::preprocess(unsigned unroll_factor) {
       };
 
       auto dupe_bb = [&](unsigned bb, unsigned loop) -> unsigned {
-        merge_in_edges.emplace_back();
         lt.node_data.reserve(lt.node_data.size()+1);
         auto &bb_data = lt.node_data[bb];
         bb_data.id = bb;
@@ -1297,20 +1291,6 @@ void Transform::preprocess(unsigned unroll_factor) {
           instr->addTarget(cond, *dst_);
           dst_data.preds.emplace_back(cond, src, to_sink);
           lt.node_data[src].succs.emplace_back(dst, cond, to_sink);
-        }
-
-        // keep edge for checking phi entries
-        auto non_sink_preds = dst_data.preds.size() - num_preds_sink;
-        if (!to_sink) {
-          // Use first orig bb to check for existence of Phi instrs since the
-          // instrs for duped bb's are only inserted during topsort
-          auto &orig_data = lt.node_data[unroll_data[dst].first_original];
-          bool has_phi = dynamic_cast<Phi*>(&orig_data.bb->front());
-          if (non_sink_preds > 1 || has_phi) {
-            auto &mie = merge_in_edges[dst];
-            if (!mie)
-              mie = non_sink_preds >= 2 && !has_phi;
-          }
         }
         return pred_to_erase;
       };
@@ -1642,16 +1622,12 @@ void Transform::preprocess(unsigned unroll_factor) {
 
         // check if necessary to add phi instructions
         for (auto bb : bbs_top_order) {
-          auto &mie = merge_in_edges[bb];
-          if (!mie)
-            continue;
           auto merge = bb; // naming semantics
-          auto &became_merge = *mie;
           auto &merge_data = lt.node_data[merge];
           unordered_set<Value*> seen_uses;
           vector<unique_ptr<Phi>> to_insert;
 
-          if (became_merge) {
+          if (merge_data.preds.size() > 1) {
             // get range of preds in topological order
             unsigned max = 0;
             unsigned min = bbs.size();
