@@ -1272,7 +1272,7 @@ void Transform::preprocess(unsigned unroll_factor) {
 
         if (replace) {
           instr->replaceTarget(cond, *dst_data.bb);
-          lt.node_data[dst].preds.emplace_back(cond, src);
+          lt.node_data[dst].preds.emplace_back(cond, src, false);
           auto &succs = lt.node_data[src].succs;
           for (auto I = succs.begin(), E = succs.end(); I != E; ++I) {
             auto &[succ, val, back_edge] = *I;
@@ -1295,7 +1295,7 @@ void Transform::preprocess(unsigned unroll_factor) {
         if (!replace) {
           auto dst_ = to_sink ? *sink : dst_data.bb;
           instr->addTarget(cond, *dst_);
-          dst_data.preds.emplace_back(cond, src);
+          dst_data.preds.emplace_back(cond, src, to_sink);
           lt.node_data[src].succs.emplace_back(dst, cond, to_sink);
         }
 
@@ -1390,16 +1390,18 @@ void Transform::preprocess(unsigned unroll_factor) {
             optional<unsigned> n_ = duplicate_header(loop);
 
             vector<pair<unsigned, unsigned>> preds_to_remove;
-            for (auto &[c, pred] : lt.node_data[loop].preds)
+            for (auto &[c, pred, be] : lt.node_data[loop].preds) {
+              (void)be;
               if (in_loop(pred, loop))
                 if (auto to_erase = add_edge(c, pred, *n_, true, false))
                   preds_to_remove.emplace_back(*to_erase);
+            }
 
             // remove preds from replaced edges outside pred iteration
             for (auto [dst, pred] : preds_to_remove) {
               auto &preds = lt.node_data[dst].preds;
               for (auto I = preds.begin(), E = preds.end(); I != E; ++I) {
-                if (I->second == pred) {
+                if (get<1>(*I) == pred) {
                   preds.erase(I);
                   break;
                 }
@@ -1524,7 +1526,7 @@ void Transform::preprocess(unsigned unroll_factor) {
           auto &phi_ref = unroll_data[id].phi_ref;
           unordered_set<unsigned> preds;
           for (auto &p : lt.node_data[id].preds)
-            preds.insert(p.second);
+            preds.insert(get<1>(p));
 
           vector<string> todo;
           for (auto &i : bb->instrs()) {
@@ -1600,6 +1602,40 @@ void Transform::preprocess(unsigned unroll_factor) {
           return updated_val;
         };
 
+        // check if a dupe of val does not exist in some path between merge
+        // and use_bb
+        auto no_dupe_between = [&](unsigned use_bb, unsigned merge,
+                                   Value *val) -> bool {
+          unordered_map<unsigned, Value*> dupes;
+          for (auto &[dupe_bb, duped_val] : instr_dupes[val]) {
+            auto dupe_bb_ = lt.node_data[dupe_bb].bb;
+            if (dupe_bb == use_bb && !use_before_decl(val, duped_val, dupe_bb_))
+              return false;
+            dupes.emplace(dupe_bb, duped_val);
+          }
+          if (use_bb == merge)
+            return true;
+          vector<unsigned> wl;
+          wl.emplace_back(use_bb);
+          while (!wl.empty()) {
+            auto bb = wl.back();
+            wl.pop_back();
+            // early exit if we reach a node through which merge is no direct
+            // or indirect predecessor (forward edges only)
+            if (top_order_idx[bb] < top_order_idx[merge] || dupes.count(bb))
+              continue;
+            for (auto &pred : lt.node_data[bb].preds) {
+              if (get<2>(pred))
+                continue;
+              if (get<1>(pred) == merge)
+                return true;
+              else
+                wl.emplace_back(get<1>(pred));
+            }
+          }
+          return false;
+        };
+
         unordered_map<Value*, Value*> phi_use;
         auto users = fn->getUsers();
         unordered_set<Phi*> seen_phi;
@@ -1620,7 +1656,7 @@ void Transform::preprocess(unsigned unroll_factor) {
             unsigned max = 0;
             unsigned min = bbs.size();
             for (auto pred : merge_data.preds) {
-              auto top_order = top_order_idx[pred.second];
+              auto top_order = top_order_idx[get<1>(pred)];
               if (top_order < min)
                 min = top_order;
               if (top_order > max)
@@ -1661,19 +1697,15 @@ void Transform::preprocess(unsigned unroll_factor) {
                   if (!is_ancestor(merge, cbbid))
                     continue;
 
-                  // if exists dupe in a bb after merge and before use, skip
-                  for (auto &[dupe_bb, duped_val] : instr_dupes[val]) {
-                    auto dupe_bb_ = lt.node_data[dupe_bb].bb;
-                    if (is_ancestor(merge, dupe_bb) &&
-                        is_ancestor(dupe_bb, cbbid) && (cbbid != dupe_bb ||
-                        !use_before_decl(val, duped_val, dupe_bb_)))
-                      goto next_duped_instr;
-                  }
+                  // if there does not exist a path from merge to use
+                  // without a dupe of val, skip
+                  if (!no_dupe_between(cbbid, merge, val))
+                    goto next_duped_instr;
 
                   // if variable not declared yet before or at some pred, skip
                   for (auto pred : merge_data.preds)
-                    if (pred.second != orig_cbbid &&
-                        !is_ancestor(orig_cbbid, pred.second))
+                    if (get<1>(pred) != orig_cbbid &&
+                        !is_ancestor(orig_cbbid, get<1>(pred)))
                       goto next_duped_instr;
 
 
@@ -1720,10 +1752,10 @@ next_duped_instr:;
               // add entries
               auto &entries = unroll_data[merge].phi_ref[phi];
               for (auto &pred : merge_data.preds) {
-                auto orig_pred = unroll_data[pred.second].first_original;
+                auto orig_pred = unroll_data[get<1>(pred)].first_original;
                 auto I = entries.find(orig_pred);
                 if (I != entries.end()) {
-                  if (pred.second == orig_pred && !I->second.second)
+                  if (get<1>(pred) == orig_pred && !I->second.second)
                     continue;
                 }
 
@@ -1733,12 +1765,12 @@ next_duped_instr:;
                 // if value for orig_pred entry is constant, add new entry for
                 // new bb with that constant
                 if (dynamic_cast<Constant*>(val)) {
-                  auto name = lt.node_data[pred.second].bb->getName();
+                  auto name = lt.node_data[get<1>(pred)].bb->getName();
                   phi->addValue(*val, move(name));
                   continue;
                 }
-                auto name = lt.node_data[pred.second].bb->getName();
-                phi->addValue(*get_updated_val(val, pred.second, phi),
+                auto name = lt.node_data[get<1>(pred)].bb->getName();
+                phi->addValue(*get_updated_val(val, get<1>(pred), phi),
                               move(name));
               }
             } else {

@@ -424,9 +424,9 @@ void LoopTree::buildLoopTree() {
         dfs_work_list.push(bb);
       auto &t_data = node_data[t_n];
       t_data.id = t_n;
-      t_data.preds.emplace_back(c, pred);
       // set back-edge flag to false for now, update later with DFS and
       // isAncestor
+      t_data.preds.emplace_back(c, pred, false);
       node_data[pred].succs.emplace_back(t_n, c, false);
     };
 
@@ -479,8 +479,8 @@ void LoopTree::buildLoopTree() {
     auto &w_data = node_data[w];
     w_data.header = 0;
     w_data.type = LHeaderType::nonheader;
-    for (auto &[c, v] : w_data.preds) {
-      (void)c;
+    for (auto &pred : w_data.preds) {
+      auto v = get<1>(pred);
       if (isAncestor(w_num, number[v]))
         w_data.back_preds.push_back(v);
       else
@@ -544,8 +544,8 @@ void LoopTree::buildLoopTree() {
         has_out_exit = has_out_entry = has_in_entry = has_in_exit = false;
         auto &lnode_data = node_data[lnode];
 
-        for (auto &[c, pred] : lnode_data.preds) {
-          (void)c;
+        for (auto &pred_ : lnode_data.preds) {
+          auto pred = get<1>(pred_);
           if (vecsetFind(pred) != w)
             has_out_entry = true; // (x, lnode) : x not in loop
           else
@@ -608,6 +608,11 @@ void LoopTree::buildLoopTree() {
         (void)val;
         work_list.push(dst);
         back_edge = isAncestor(number[dst], number[cur]);
+        if (back_edge) {
+          for (auto &pred : node_data[dst].preds)
+            if (get<1>(pred) == cur)
+              get<2>(pred) = true;
+        }
       }
     }
   }
