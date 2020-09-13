@@ -1659,14 +1659,9 @@ void Transform::preprocess(unsigned unroll_factor) {
                   auto cbbid = lt.bb_map[*((Instr*) I->second)->containingBB()];
                   auto orig_cbbid = lt.bb_map[*((Instr*) val)->containingBB()];
 
-                  // if use in merge and already in an pre-existing phi skip
-                  // since it is already being distinguished between preds
-                  // no need for a phi exists here
-                  if (cbbid == merge)
-                    if (auto phi = dynamic_cast<Phi*>(I->second))
-                      for (auto op : phi->operands())
-                        if (op == val)
-                          break;
+                  // if use in a phi ignore it
+                  if (cbbid == merge && dynamic_cast<Phi*>(I->second))
+                    continue;
 
                   // if use does not come after merge skip
                   if (!is_ancestor(merge, cbbid))
