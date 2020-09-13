@@ -1670,7 +1670,7 @@ void Transform::preprocess(unsigned unroll_factor) {
                   // if there does not exist a path from merge to use
                   // without a dupe of val, skip
                   if (!no_dupe_between(cbbid, merge, val))
-                    goto next_duped_instr;
+                    continue;
 
                   // if variable not declared yet before or at some pred, skip
                   for (auto pred : merge_data.preds)
