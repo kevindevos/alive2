@@ -1722,8 +1722,19 @@ next_duped_instr:;
           // phi entries
           for (auto &instr : merge_data.bb->instrs()) {
             if (auto phi = dynamic_cast<Phi*>(const_cast<Instr*>(&instr))) {
-              // add entries
               auto &entries = unroll_data[merge].phi_ref[phi];
+
+              // update values of current phi entries
+              for (auto &[pred, data] : entries) {
+                auto &[val, removed] = data;
+                if (!removed) {
+                  if (dynamic_cast<Constant*>(val))
+                    continue;
+                  phi->rauw(*val, *get_updated_val(val, pred, phi));
+                }
+              }
+
+              // add entries with updated values
               for (auto &pred : merge_data.preds) {
                 auto orig_pred = unroll_data[get<1>(pred)].first_original;
                 auto I = entries.find(orig_pred);
@@ -1752,24 +1763,17 @@ next_duped_instr:;
           }
         }
 
-        // update instruction operands by traversing bb's in reverse top order
+        // update non-phi instruction operands in reverse topological order
         for (auto I = bbs_top_order.rbegin(), E = bbs_top_order.rend(); I != E;
              ++I) {
           auto bb = *I;
           for (auto &i_dupe : unroll_data[bb].dupes) {
             auto its = users.equal_range(i_dupe.first);
-
             for (auto II = its.first, EE = its.second; II != EE;) {
               auto instr = (Instr*) II->second;
 
-              // check if existing phi has values to update
-              if (auto phi = dynamic_cast<Phi*>(instr)) {
-                for (auto &[val, bb_name] : phi->getValues()) {
-                  if (dynamic_cast<Constant*>(val))
-                    continue;
-                  auto pred_id = lt.bb_map[&fn->getBB(bb_name)];
-                  phi->rauw(*val, *get_updated_val(val, pred_id, phi));
-                }
+              // skip phi - already updated
+              if (dynamic_cast<Phi*>(instr)) {
                 ++II;
                 continue;
               }
