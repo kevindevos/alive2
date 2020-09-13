@@ -1659,19 +1659,20 @@ void Transform::preprocess(unsigned unroll_factor) {
                   auto cbbid = lt.bb_map[*((Instr*) I->second)->containingBB()];
                   auto orig_cbbid = lt.bb_map[*((Instr*) val)->containingBB()];
 
-                  // if use in a phi ignore it
+                  // skip if use is in a phi
                   if (cbbid == merge && dynamic_cast<Phi*>(I->second))
                     continue;
 
-                  // if use does not come after merge skip
+                  // skip if use does not come after merge
                   if (!is_ancestor(merge, cbbid))
                     continue;
 
-                  // if there does not exist a path from merge to use
-                  // without a dupe of val, skip
+                  // skip if there exists a dupe of val between merge and use
+                  // in every path
                   if (!no_dupe_between(cbbid, merge, val))
                     continue;
 
+                  // independent from use but called much less often here
                   // if variable not declared yet before or at some pred, skip
                   for (auto pred : merge_data.preds)
                     if (get<1>(pred) != orig_cbbid &&
