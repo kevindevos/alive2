@@ -1475,6 +1475,7 @@ void Transform::preprocess(unsigned unroll_factor) {
         // update BB_order in function for the desired topological order
         vector<unsigned> bbs_top_order;
         vector<unsigned> top_order_idx;
+        vector<pair<Phi*, string>> todo_original;
         top_order_idx.resize(lt.node_data.size());
         auto &bbs = fn->getBBs();
         bbs.clear();
@@ -1515,8 +1516,12 @@ void Transform::preprocess(unsigned unroll_factor) {
               for (auto &[val, bb_name] : phi->getValues()) {
                 auto pred_id = lt.bb_map[&fn->getBB(bb_name)];
                 auto to_remove = !preds.count(pred_id);
-                if (to_remove && bb != orig_bb)
-                  todo.emplace_back(bb_name);
+                if (to_remove) {
+                  if (bb != orig_bb)
+                    todo.emplace_back(bb_name);
+                  else
+                    todo_original.emplace_back(phi, bb_name);
+                }
                 phi_entry.try_emplace(pred_id, val, to_remove);
               }
               for (auto &name : todo)
@@ -1525,6 +1530,10 @@ void Transform::preprocess(unsigned unroll_factor) {
             }
           }
         }
+        // remove phi entries from original bb after all dupes have been
+        // processed in topsort (they require original as reference)
+        for (auto [phi, bb_name] : todo_original)
+          phi->removeValue(bb_name);
 
         // check if bb1 is ancestor of bb2 through transitive closure of bb1
         unordered_map<unsigned, unordered_set<unsigned>> transitive_closure;
