@@ -1618,7 +1618,6 @@ void Transform::preprocess(unsigned unroll_factor) {
 
         unordered_map<Value*, Value*> phi_use;
         auto users = fn->getUsers();
-        unordered_set<Phi*> seen_phi;
 
         // check if necessary to add phi instructions
         for (auto merge : bbs_top_order) {
@@ -1723,8 +1722,6 @@ next_duped_instr:;
           // phi entries
           for (auto &instr : merge_data.bb->instrs()) {
             if (auto phi = dynamic_cast<Phi*>(const_cast<Instr*>(&instr))) {
-              seen_phi.insert(phi);
-
               // add entries
               auto &entries = unroll_data[merge].phi_ref[phi];
               for (auto &pred : merge_data.preds) {
@@ -1767,13 +1764,11 @@ next_duped_instr:;
 
               // check if existing phi has values to update
               if (auto phi = dynamic_cast<Phi*>(instr)) {
-                if (!seen_phi.count(phi)) {
-                  for (auto &[val, bb_name] : phi->getValues()) {
-                    if (dynamic_cast<Constant*>(val))
-                      continue;
-                    auto pred_id = lt.bb_map[&fn->getBB(bb_name)];
-                    phi->rauw(*val, *get_updated_val(val, pred_id, phi));
-                  }
+                for (auto &[val, bb_name] : phi->getValues()) {
+                  if (dynamic_cast<Constant*>(val))
+                    continue;
+                  auto pred_id = lt.bb_map[&fn->getBB(bb_name)];
+                  phi->rauw(*val, *get_updated_val(val, pred_id, phi));
                 }
                 ++II;
                 continue;
