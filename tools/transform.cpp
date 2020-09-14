@@ -1259,7 +1259,8 @@ void Transform::preprocess(unsigned unroll_factor) {
       };
 
       auto add_edge = [&](Value *cond, unsigned src, unsigned dst, bool replace,
-                          bool to_sink) -> optional<pair<unsigned,unsigned>> {
+                          bool to_sink, bool is_default)
+                          -> optional<pair<unsigned,unsigned>> {
         // dst <- src
         optional<pair<unsigned, unsigned>> pred_to_erase;
         auto &src_data = lt.node_data[src];
@@ -1269,9 +1270,8 @@ void Transform::preprocess(unsigned unroll_factor) {
         if (replace) {
           instr->replaceTarget(cond, *dst_data.bb);
           lt.node_data[dst].preds.emplace_back(cond, src, false);
-          auto &succs = lt.node_data[src].succs;
-          for (auto I = succs.begin(), E = succs.end(); I != E; ++I) {
-            auto &[succ, val, back_edge] = *I;
+          for (auto &[succ, val, back_edge, def] : lt.node_data[src].succs) {
+            (void)def;
             if (val == cond) {
               pred_to_erase = make_pair(succ, src);
               succ = dst;
@@ -1290,9 +1290,14 @@ void Transform::preprocess(unsigned unroll_factor) {
 
         if (!replace) {
           auto dst_ = to_sink ? *sink : dst_data.bb;
-          instr->addTarget(cond, *dst_);
+          if (is_default) {
+            if (auto sw = dynamic_cast<Switch*>(&src_data.bb->back()))
+              sw->setDefaultTarget(*dst_);
+          } else {
+            instr->addTarget(cond, *dst_);
+          }
           dst_data.preds.emplace_back(cond, src, to_sink);
-          lt.node_data[src].succs.emplace_back(dst, cond, to_sink);
+          lt.node_data[src].succs.emplace_back(dst, cond, to_sink, is_default);
         }
         return pred_to_erase;
       };
@@ -1307,10 +1312,10 @@ void Transform::preprocess(unsigned unroll_factor) {
 
       auto add_edges_to_sink = [&](unsigned bb, unsigned ref_bb,
                                    unsigned loop_header) {
-        for (auto &[dst, val, back_edge] : lt.node_data[ref_bb].succs) {
+        for (auto &[dst, val, back_edge, def] : lt.node_data[ref_bb].succs) {
           (void)back_edge;
           if (in_loop(dst, loop_header))
-            add_edge(val, bb, last_dupe(dst), false, true);
+            add_edge(val, bb, last_dupe(dst), false, true, def);
         }
       };
 
@@ -1375,7 +1380,7 @@ void Transform::preprocess(unsigned unroll_factor) {
             for (auto &[c, pred, be] : lt.node_data[loop].preds) {
               (void)be;
               if (in_loop(pred, loop))
-                if (auto to_erase = add_edge(c, pred, *n_, true, false))
+                if (auto to_erase = add_edge(c, pred, *n_, true, false, false))
                   preds_to_remove.emplace_back(*to_erase);
             }
 
@@ -1390,15 +1395,15 @@ void Transform::preprocess(unsigned unroll_factor) {
               }
             }
 
-            for (auto &[dst, val, back_edge] : lt.node_data[loop].succs) {
+            for (auto &[dst, val, back_edge, def] : lt.node_data[loop].succs) {
               (void)back_edge;
               if (!in_loop(dst, loop))
-                add_edge(val, *n_, last_dupe(dst), false, false);
+                add_edge(val, *n_, last_dupe(dst), false, false, def);
             }
 
             // back-edges as edges to #sink
             if (is_last_it && n_)
-              add_edges_to_sink(*n_, loop, cur_loop);
+              add_edges_to_sink(*n_, loop, loop);
           }
 
           auto n_prev = last_dupe(n);
@@ -1412,13 +1417,13 @@ void Transform::preprocess(unsigned unroll_factor) {
                n_ = duplicate_header(n);
 
             // dupe header edges
-            for (auto &[dst, val, back_edge] : lt.node_data[n].succs) {
+            for (auto &[dst, val, back_edge, def] : lt.node_data[n].succs) {
               (void)back_edge;
               if (in_loop(dst, n))
-                add_edge(val, n_prev, last_dupe(dst), false, false);
+                add_edge(val, n_prev, last_dupe(dst), false, false, def);
               else
                 if (n_)
-                  add_edge(val, *n_, dst, false, false);
+                  add_edge(val, *n_, dst, false, false, def);
             }
 
             // edges to #sink
@@ -1430,13 +1435,13 @@ void Transform::preprocess(unsigned unroll_factor) {
             auto loop_size = loop.size();
             for (unsigned i = 1; i < loop_size; ++i) {
               auto bb = loop[i];
-              for (auto &[dst, val, back_edge] : lt.node_data[bb].succs) {
+              for (auto &[dst, val, back_edge, def] : lt.node_data[bb].succs) {
                 auto dst_original = unroll_data[dst].original;
                 bool dst_in_loop = in_loop(dst_original, cur_loop);
                 auto dst_ = dst_in_loop ? last_dupe(dst) : dst;
                 auto src = last_dupe(bb);
-                bool back_edge_ = back_edge || dst_ == n_prev;
-                add_edge(val, src, dst_, false, back_edge_);
+                add_edge(val, src, dst_, false, back_edge || dst_ == n_prev,
+                         def);
               }
             }
             n_prev = *n_;
@@ -1461,8 +1466,9 @@ void Transform::preprocess(unsigned unroll_factor) {
           if (!seen) {
             seen = true;
             worklist.push_back(cur);
-            for (auto &[dst, val, back_edge]: lt.node_data[cur].succs) {
+            for (auto &[dst, val, back_edge, def]: lt.node_data[cur].succs) {
               (void)val;
+              (void)def;
               if (!back_edge && !marked[dst].first)
                 worklist.push_back(dst);
             }
@@ -1553,7 +1559,8 @@ void Transform::preprocess(unsigned unroll_factor) {
           do {
             auto bb = wl.back();
             wl.pop_back();
-            for (auto &[dst, val, back_edge] : lt.node_data[bb].succs) {
+            for (auto &[dst, val, back_edge, def] : lt.node_data[bb].succs) {
+              (void)def;
               if (!back_edge && tc.insert(dst).second) {
                 wl.push_back(dst);
                 if (dst == bb2)

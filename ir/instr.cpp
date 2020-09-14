@@ -1936,10 +1936,7 @@ void JumpInstr::addTarget(Value *val, BasicBlock &target) {
       br->setTrue(val, target);
     }
   } else if (auto sw = dynamic_cast<Switch*>(this)) {
-    if (!sw->getDefault())
-      sw->setDefaultTarget(val, target);
-    else
-      sw->addTarget(*val, target);
+    sw->addTarget(*val, target);
   }
 }
 
@@ -1953,7 +1950,7 @@ void JumpInstr::replaceTarget(Value *cond, BasicBlock &new_dst) {
   } else if (auto sw = dynamic_cast<Switch*>(this)) {
     // replace for both default and targets if duplicate exists
     if (sw->getDefaultValue() == cond && sw->getDefault() != nullptr)
-      sw->setDefaultTarget(sw->getDefaultValue(), new_dst);
+      sw->setDefaultTarget(new_dst);
     int n_targets = sw->getNumTargets();
     for (int i = 0; i < n_targets; ++i) {
       auto &[val, dst] = sw->getTarget(i);
@@ -2044,16 +2041,12 @@ unique_ptr<Instr> Branch::dup(const string &suffix) const {
   return make_unique<Branch>(*dst_true);
 }
 
-void Switch::setDefaultTarget(Value *val, BasicBlock &target) {
-  value = val;
+void Switch::setDefaultTarget(BasicBlock &target) {
   default_target = &target;
 }
 
 void Switch::addTarget(Value &val, BasicBlock &target) {
-  if (default_target)
-    targets.emplace_back(&val, &target);
-  else
-    setDefaultTarget(&val, target);
+  targets.emplace_back(&val, &target);
 }
 
 void Switch::setTarget(Value *val, BasicBlock &target, unsigned i) {
@@ -2062,7 +2055,6 @@ void Switch::setTarget(Value *val, BasicBlock &target, unsigned i) {
 }
 
 void Switch::clearTargets() {
-  value = nullptr;
   default_target = nullptr;
   targets.clear();
 }

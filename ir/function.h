@@ -207,7 +207,8 @@ public:
     unsigned id;
     BasicBlock *bb;
     std::vector<std::tuple<Value*, unsigned, bool>> preds;
-    std::list<std::tuple<unsigned, Value*, bool>> succs;
+    // id, cond, is_back_edge, default
+    std::vector<std::tuple<unsigned, Value*, bool, bool>> succs;
     std::vector<unsigned> non_back_preds;
     std::vector<unsigned> back_preds;
     std::vector<unsigned> red_back_in;

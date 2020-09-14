@@ -417,7 +417,8 @@ void LoopTree::buildLoopTree() {
     dfs_work_list.push(entry);
     unsigned current = ROOT_ID;
 
-    auto try_push_worklist = [&](const BasicBlock *bb, unsigned pred, auto c) {
+    auto try_push_worklist = [&](const BasicBlock *bb, unsigned pred, auto c,
+                                 bool is_default) {
       auto t_n = bb_id(bb);
       bool b_visited = visited[t_n];
       if (!b_visited)
@@ -427,7 +428,7 @@ void LoopTree::buildLoopTree() {
       // set back-edge flag to false for now, update later with DFS and
       // isAncestor
       t_data.preds.emplace_back(c, pred, false);
-      node_data[pred].succs.emplace_back(t_n, c, false);
+      node_data[pred].succs.emplace_back(t_n, c, false, is_default);
     };
 
     while (!dfs_work_list.empty()) {
@@ -450,15 +451,18 @@ void LoopTree::buildLoopTree() {
         if (succ_overr.empty()) {
           if (auto instr = dynamic_cast<const JumpInstr*>(&cur_bb->back())) {
             auto tgt_it = const_cast<JumpInstr*>(instr)->targets();
+            auto first_it = true;
             for (auto I = tgt_it.begin(), E = tgt_it.end(); I != E; ++I) {
               auto [cond, bb] = I.get();
-              try_push_worklist(bb, n, cond);
+              bool is_default = dynamic_cast<const Switch*>(instr) && first_it;
+              try_push_worklist(bb, n, cond, is_default);
+              first_it = false;
             }
           }
         } else {
           // if new bbs were added from fix_loops, use succ_overr instead
           for (auto succ : succ_overr)
-            try_push_worklist(succ, n, nullptr);
+            try_push_worklist(succ, n, nullptr, false); // TODO remove
         }
       } else {
         last[number[n]] = current - 1;
@@ -604,8 +608,9 @@ void LoopTree::buildLoopTree() {
 
     if (!visited[cur]) {
       visited[cur] = true;
-      for (auto &[dst, val, back_edge] : node_data[cur].succs) {
+      for (auto &[dst, val, back_edge, def] : node_data[cur].succs) {
         (void)val;
+        (void)def;
         work_list.push(dst);
         back_edge = isAncestor(number[dst], number[cur]);
         if (back_edge) {

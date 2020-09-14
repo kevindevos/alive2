@@ -394,7 +394,7 @@ public:
     : JumpInstr(Type::voidTy, "switch"), value(&value),
       default_target(&default_target) {}
 
-  void setDefaultTarget(Value *val, BasicBlock &target);
+  void setDefaultTarget(BasicBlock &target);
   void addTarget(Value &val, BasicBlock &target);
   void setTarget(Value *val, BasicBlock &target, unsigned i);
   void clearTargets();
