@@ -1106,8 +1106,10 @@ void Transform::preprocess(unsigned unroll_factor) {
   if (k > 0) {
     // create empty body for single node loops
     for (auto fn : { &src, &tgt }) {
-      for (auto bb : fn->getBBs()) {
+      unsigned bb_count = fn->getBBs().size();
+      for (unsigned i = 0; i < bb_count; ++i) {
         bool created_body = false;
+        auto bb = fn->getBBs()[i];
         if (auto jmp = dynamic_cast<JumpInstr*>(&bb->back())) {
           auto tgt_it = jmp->targets();
           for (auto I = tgt_it.begin(), E = tgt_it.end(); I != E; ++I) {
