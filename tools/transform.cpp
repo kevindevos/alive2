@@ -1200,12 +1200,11 @@ void Transform::preprocess(unsigned unroll_factor) {
 
       // debug print cfg and loop tree
       if (config::debug) {
-        if (fn != &tgt) {
-          ofstream f1("src.dot");
-          cfg.printDot(f1);
-          ofstream f2("loop.dot");
-          lt.printDot(f2);
-        }
+        string name = fn == &src ? "src" : "tgt";
+        ofstream f1(name+".dot");
+        cfg.printDot(f1);
+        ofstream f2("loop.dot");
+        lt.printDot(f2);
       }
 
       auto last_dupe = [&](unsigned bb) -> unsigned {
@@ -1852,11 +1851,10 @@ next_duped_instr:;
 
       // DEBUG , print unrolled dot for src only
       if (config::debug) {
-        if (fn != &tgt) {
-          CFG cfg_(*fn);
-          ofstream f3("src_unrolled.dot");
-          cfg_.printDot(f3);
-        }
+        string name = fn == &src ? "src" : "tgt";
+        CFG cfg_(*fn);
+        ofstream f3(name+"_unrolled.dot");
+        cfg_.printDot(f3);
       }
     }
   }
