@@ -111,7 +111,7 @@ public:
 
   virtual smt::expr
     mkInput(State &s, const char *name, const ParamAttrs &attrs) const = 0;
-  virtual std::pair<smt::expr, std::vector<smt::expr>>
+  virtual std::pair<smt::expr, smt::expr>
     mkUndefInput(State &s, const ParamAttrs &attrs) const;
 
   virtual void printVal(std::ostream &os, State &s,
@@ -243,7 +243,7 @@ public:
             const StateValue &tgt) const override;
   smt::expr
     mkInput(State &s, const char *name, const ParamAttrs &attrs) const override;
-  std::pair<smt::expr, std::vector<smt::expr>>
+  std::pair<smt::expr, smt::expr>
     mkUndefInput(State &s, const ParamAttrs &attrs) const override;
   void printVal(std::ostream &os, State &s, const smt::expr &e) const override;
   void print(std::ostream &os) const override;
@@ -269,8 +269,7 @@ public:
   unsigned numElementsConst() const { return elements; }
   unsigned numPaddingsConst() const;
 
-  StateValue aggregateVals(const std::vector<StateValue> &vals,
-                           bool needsPadding = false) const;
+  StateValue aggregateVals(const std::vector<StateValue> &vals) const;
   IR::StateValue extract(const IR::StateValue &val, unsigned index,
                          bool fromInt = false) const;
   Type& getChild(unsigned index) const { return *children[index]; }
@@ -279,6 +278,7 @@ public:
 
   unsigned bits() const override;
   unsigned np_bits() const override;
+  // Padding is filled with poison regardless of non_poison.
   IR::StateValue getDummyValue(bool non_poison) const override;
   smt::expr getTypeConstraints() const override;
   smt::expr sizeVar() const override;
@@ -299,8 +299,6 @@ public:
             const StateValue &tgt) const override;
   smt::expr
     mkInput(State &s, const char *name, const ParamAttrs &attrs) const override;
-  std::pair<smt::expr, std::vector<smt::expr>>
-    mkUndefInput(State &s, const ParamAttrs &attrs) const override;
   unsigned numPointerElements() const;
   void printVal(std::ostream &os, State &s, const smt::expr &e) const override;
   const AggregateType* getAsAggregateType() const override;
@@ -328,6 +326,7 @@ public:
   IR::StateValue update(const IR::StateValue &vector,
                         const IR::StateValue &val,
                         const smt::expr &idx) const;
+  unsigned np_bits() const override;
   smt::expr getTypeConstraints() const override;
   smt::expr scalarSize() const override;
   bool isVectorType() const override;
@@ -407,7 +406,7 @@ public:
   smt::expr
     mkInput(State &s, const char *name, const ParamAttrs &attrs)
     const override;
-  std::pair<smt::expr, std::vector<smt::expr>>
+  std::pair<smt::expr, smt::expr>
     mkUndefInput(State &s, const ParamAttrs &attrs) const override;
   void printVal(std::ostream &os, State &s, const smt::expr &e) const override;
   void print(std::ostream &os) const override;
@@ -416,6 +415,6 @@ public:
 
 bool hasPtr(const Type &t);
 bool isNonPtrVector(const Type &t);
-bool hasSubByte(const Type &t);
+unsigned minVectorElemSize(const Type &t);
 uint64_t getCommonAccessSize(const Type &ty);
 }

@@ -243,22 +243,34 @@ multimap<Value*, Value*> Function::getUsers() const {
 }
 
 template <typename T>
-static bool removeUnused(T &data, const multimap<Value*, Value*> &users) {
+static bool removeUnused(T &data, const multimap<Value*, Value*> &users,
+                         const vector<string_view> &src_glbs) {
   bool changed = false;
   for (auto I = data.begin(); I != data.end(); ) {
     if (users.count(I->get())) {
       ++I;
-    } else {
-      I = data.erase(I);
-      changed = true;
+      continue;
     }
+
+    // don't delete glbs in target that are used in src
+    if (auto gv = dynamic_cast<GlobalVariable*>(I->get())) {
+      auto name = string_view(gv->getName()).substr(1);
+      if (find(src_glbs.begin(), src_glbs.end(), name) != src_glbs.end()) {
+        ++I;
+        continue;
+      }
+    }
+
+    I = data.erase(I);
+    changed = true;
   }
   return changed;
 }
 
-bool Function::removeUnusedStuff(const multimap<Value*, Value*> &users) {
-  bool changed = removeUnused(aggregates, users);
-  changed |= removeUnused(constants, users);
+bool Function::removeUnusedStuff(const multimap<Value*, Value*> &users,
+                                 const vector<string_view> &src_glbs) {
+  bool changed = removeUnused(aggregates, users, src_glbs);
+  changed |= removeUnused(constants, users, src_glbs);
   return changed;
 }
 
@@ -668,8 +680,6 @@ void LoopTree::printDot(std::ostream &os) const {
 // Relies on Alive's top_sort run during llvm2alive conversion in order to
 // traverse the cfg in reverse postorder to build dominators.
 void DomTree::buildDominators() {
-  unordered_set<const BasicBlock*> visited_src;
-
   // initialization
   unsigned i = f.getBBs().size();
   for (auto &b : f.getBBs()) {
@@ -677,22 +687,14 @@ void DomTree::buildDominators() {
   }
 
   // build predecessors relationship
-  for (const auto &[src, tgt, instr] : cfg) {
+  for (auto [src, tgt, instr] : cfg) {
     (void)instr;
-    // skip back-edges
-    visited_src.insert(&src);
-    if (!visited_src.count(&tgt))
-      doms.at(&tgt).preds.push_back(&doms.at(&src));
+    doms.at(&tgt).preds.push_back(&doms.at(&src));
   }
 
-  // make sure all tree roots have themselves as dominator
-  for (auto &[b, b_dom] : doms) {
-    (void)b;
-    if (b_dom.preds.empty())
-      b_dom.dominator = &b_dom;
-  }
+  auto &entry = doms.at(&f.getFirstBB());
+  entry.dominator = &entry;
 
-  // Adaptation of the algorithm in the article
   // Cooper, Keith D.; Harvey, Timothy J.; and Kennedy, Ken (2001).
   // A Simple, Fast Dominance Algorithm
   // http://www.cs.rice.edu/~keith/EMBED/dom.pdf

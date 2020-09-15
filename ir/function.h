@@ -161,7 +161,8 @@ public:
   instr_helper instrs() const { return *this; }
 
   std::multimap<Value*, Value*> getUsers() const;
-  bool removeUnusedStuff(const std::multimap<Value*, Value*> &users);
+  bool removeUnusedStuff(const std::multimap<Value*, Value*> &users,
+                         const std::vector<std::string_view> &src_glbs);
 
   void print(std::ostream &os, bool print_header = true) const;
   friend std::ostream &operator<<(std::ostream &os, const Function &f);
@@ -288,7 +289,7 @@ class DomTree final {
     std::unordered_map<const BasicBlock*, DomTreeNode> doms;
 
     void buildDominators();
-    DomTreeNode* intersect(DomTreeNode *b1, DomTreeNode *b2);
+    static DomTreeNode* intersect(DomTreeNode *b1, DomTreeNode *b2);
 
   public:
     DomTree(Function &f, CFG &cfg) : f(f), cfg(cfg) { buildDominators(); }

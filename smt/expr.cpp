@@ -9,7 +9,6 @@
 #include <limits>
 #include <memory>
 #include <string>
-#include <unordered_set>
 #include <z3.h>
 
 #define DEBUG_Z3_RC 0
@@ -163,6 +162,11 @@ expr expr::mkUInt(uint64_t n, unsigned bits) {
   return bits ? mkUInt(n, mkBVSort(bits)) : expr();
 }
 
+expr expr::mkUInt(uint64_t n, const expr &type) {
+  C2(type);
+  return mkUInt(n, type.sort());
+}
+
 expr expr::mkInt(int64_t n, Z3_sort sort) {
   return Z3_mk_int64(ctx(), n, sort);
 }
@@ -217,7 +221,7 @@ expr expr::mkQuantVar(unsigned i, Z3_sort sort) {
 
 bool expr::isBinOp(expr &a, expr &b, int z3op) const {
   if (auto app = isAppOf(z3op)) {
-    if (Z3_get_domain_size(ctx(), decl()) != 2)
+    if (Z3_get_app_num_args(ctx(), app) != 2)
       return false;
     a = Z3_get_app_arg(ctx(), app, 0);
     b = Z3_get_app_arg(ctx(), app, 1);
@@ -289,6 +293,13 @@ bool expr::isConst() const {
          Z3_get_bool_value(ctx(), ast()) != Z3_L_UNDEF;
 }
 
+bool expr::isVar() const {
+  C();
+  if (auto app = isApp())
+    return !isConst() && Z3_get_app_num_args(ctx(), app) == 0;
+  return false;
+}
+
 bool expr::isBV() const {
   C();
   return Z3_get_sort_kind(ctx(), sort()) == Z3_BV_SORT;
@@ -332,9 +343,10 @@ bool expr::isSMax() const {
   return eq(IntSMax(bits()));
 }
 
-bool expr::isSigned() const {
+expr expr::isNegative() const {
+  C();
   auto bit = bits() - 1;
-  return extract(bit, bit).isOne();
+  return extract(bit, bit) == 1;
 }
 
 unsigned expr::bits() const {
@@ -647,6 +659,17 @@ expr expr::usub_sat(const expr &rhs) const {
               *this - rhs);
 }
 
+expr expr::sshl_sat(const expr &rhs) const {
+  C();
+  return mkIf(shl_no_soverflow(rhs), *this << rhs,
+              mkIf(isNegative(), IntSMin(bits()), IntSMax(bits())));
+}
+
+expr expr::ushl_sat(const expr &rhs) const {
+  C();
+  return mkIf(shl_no_uoverflow(rhs), *this << rhs, IntUMax(bits()));
+}
+
 expr expr::add_no_soverflow(const expr &rhs) const {
   if (min_leading_zeros() >= 2 && rhs.min_leading_zeros() >= 2)
     return true;
@@ -657,11 +680,10 @@ expr expr::add_no_uoverflow(const expr &rhs) const {
   if (min_leading_zeros() >= 1 && rhs.min_leading_zeros() >= 1)
     return true;
 
-  int64_t n;
-  if (isInt(n))
-    return rhs.ule(-n - 1);
-  if (rhs.isInt(n))
-    return ule(-n - 1);
+  if (rhs.isConst())
+    return ule(mkInt(-1, rhs.sort()) - rhs);
+  if (isConst())
+    return rhs.add_no_uoverflow(*this);
 
   auto bw = bits();
   return (zext(1) + rhs.zext(1)).extract(bw, bw) == 0;
@@ -857,6 +879,12 @@ expr expr::smin(const expr &rhs) const {
 
 expr expr::smax(const expr &rhs) const {
   return mkIf(sge(rhs), *this, rhs);
+}
+
+expr expr::abs() const {
+  C();
+  auto s = sort();
+  return mkIf(sge(mkUInt(0, s)), *this, mkInt(-1, s) * *this);
 }
 
 expr expr::isNaN() const {
@@ -1148,7 +1176,8 @@ expr expr::cmp_eq(const expr &rhs, bool simplify) const {
         return c == c2;
 
       // (= (ite c t e) x) -> (ite c (= t x) (= e x))
-      if (rhs.isConst() || (t.isConst() && e.isConst()))
+      if ((rhs.isConst() && (!t.isVar() || !e.isVar())) ||
+          (t.isConst() && e.isConst() && !rhs.isVar()))
         return mkIf(c, t == rhs, e == rhs);
     }
     else if (rhs.isAppOf(Z3_OP_ITE)) {
@@ -1169,45 +1198,38 @@ expr expr::operator!=(const expr &rhs) const {
 }
 
 expr expr::operator&&(const expr &rhs) const {
-  C(rhs);
   if (eq(rhs) || isFalse() || rhs.isTrue())
     return *this;
   if (isTrue() || rhs.isFalse())
     return rhs;
 
+  C(rhs);
   Z3_ast args[] = { ast(), rhs() };
   return Z3_mk_and(ctx(), 2, args);
 }
 
 expr expr::operator||(const expr &rhs) const {
-  C(rhs);
   if (eq(rhs) || rhs.isFalse() || isTrue())
     return *this;
   if (rhs.isTrue() || isFalse())
     return rhs;
 
+  expr n;
+  if ((isNot(n) && n.eq(rhs)) ||
+      (rhs.isNot(n) && eq(n)))
+    return true;
+
+  C(rhs);
   Z3_ast args[] = { ast(), rhs() };
   return Z3_mk_or(ctx(), 2, args);
 }
 
 void expr::operator&=(const expr &rhs) {
-  if (!isValid() || eq(rhs) || isFalse() || rhs.isTrue()) {
-    // do nothing
-  } else if (!rhs.isValid() || rhs.isFalse() || isTrue()) {
-    *this = rhs;
-  } else {
-    *this = *this && rhs;
-  }
+  *this = *this && rhs;
 }
 
 void expr::operator|=(const expr &rhs) {
-  if (!isValid() || eq(rhs) || rhs.isFalse() || isTrue()) {
-    // do nothing
-  } else if (!rhs.isValid() || isFalse() || rhs.isTrue()) {
-    *this = rhs;
-  } else {
-    *this = *this || rhs;
-  }
+  *this = *this || rhs;
 }
 
 expr expr::mk_and(const set<expr> &vals) {
@@ -1261,6 +1283,14 @@ expr expr::uge(const expr &rhs) const {
 }
 
 expr expr::ugt(const expr &rhs) const {
+  C();
+  if (rhs.isAllOnes())
+    return false;
+
+  uint64_t n;
+  if (rhs.isUInt(n))
+    return uge(mkUInt(n + 1, sort()));
+
   return !ule(rhs);
 }
 
@@ -1354,13 +1384,27 @@ expr expr::concat(const expr &rhs) const {
   expr a, b, c, d;
   unsigned h, l, h2, l2;
   if (isExtract(a, h, l)) {
-    if (rhs.isExtract(b, h2, l2) && l == h2+1 && a.eq(b))
-      return a.extract(h, l2);
+    if (rhs.isExtract(b, h2, l2) && l == h2+1) {
+      if (a.eq(b))
+        return a.extract(h, l2);
+
+      // (concat (extract (concat const X)) (extract X))
+      expr aa, ab;
+      if (l2 == 0 && a.isConcat(aa, ab) && ab.eq(b) &&
+          (h - aa.bits()) == b.bits())
+        return aa.concat(b);
+    }
 
     //  extract_l concat (concat extract_r foo)
     if (rhs.isConcat(b, c) && b.isExtract(d, h2, l2) && l == h2+1 && a.eq(d))
       return a.extract(h, l2).concat(c);
   }
+
+  // (concat (concat x extract) extract)
+  if (isConcat(a, b) && b.isExtract(c, h, l) && rhs.isExtract(d, h2, l2) &&
+      l == h2+1 && c.eq(d))
+    return a.concat(c.extract(h, l2));
+
   return binop_fold(rhs, Z3_mk_concat);
 }
 
@@ -1599,25 +1643,32 @@ expr expr::mkForAll(const set<expr> &vars, expr &&val) {
                             val());
 }
 
-expr expr::mkLambda(const set<expr> &vars, const expr &val) {
-  C2(val);
-  assert(!vars.empty());
+expr expr::mkLambda(const expr &var, const expr &val) {
+  C2(var, val);
 
-  unique_ptr<Z3_app[]> vars_ast(new Z3_app[vars.size()]);
-  unsigned i = 0;
-  for (auto &v : vars) {
-    vars_ast[i++] = (Z3_app)v();
-  }
-  return Z3_mk_lambda_const(ctx(), vars.size(), vars_ast.get(), val());
+  if (!val.vars().count(var))
+    return mkConstArray(var, val);
+
+  expr array, idx;
+  if (val.isLoad(array, idx) && idx.eq(var))
+    return array;
+
+  auto ast = (Z3_app)var();
+  return Z3_mk_lambda_const(ctx(), 1, &ast, val());
 }
 
 expr expr::simplify() const {
   C();
-  return Z3_simplify(ctx(), ast());
+  auto e = Z3_simplify(ctx(), ast());
+  // Z3_simplify returns null on timeout
+  return e ? e : *this;
 }
 
 expr expr::subst(const vector<pair<expr, expr>> &repls) const {
   C();
+  if (repls.empty())
+    return *this;
+
   unique_ptr<Z3_ast[]> from(new Z3_ast[repls.size()]);
   unique_ptr<Z3_ast[]> to(new Z3_ast[repls.size()]);
 
@@ -1697,33 +1748,12 @@ set<expr> expr::vars(const vector<const expr*> &exprs) {
   return result;
 }
 
-vector<expr> expr::allLeafs(const expr &e) {
-  vector<expr> ret;
-  vector<expr> worklist = { e };
-  unordered_set<Z3_ast> seen;
-  do {
-    expr v = worklist.back();
-    worklist.pop_back();
-    if (!seen.insert(v.isValid() ? v() : nullptr).second)
-      continue;
-
-    expr cond, then, els;
-    if (v.isIf(cond, then, els)) {
-      worklist.emplace_back(move(then));
-      worklist.emplace_back(move(els));
-    } else {
-      ret.emplace_back(move(v));
-    }
-  } while (!worklist.empty());
-  return ret;
-}
-
 void expr::printUnsigned(ostream &os) const {
   os << numeral_string();
 }
 
 void expr::printSigned(ostream &os) const {
-  if (isSigned()) {
+  if (isNegative().isTrue()) {
     os << '-';
     (~*this + mkUInt(1, sort())).printUnsigned(os);
   } else {
@@ -1767,6 +1797,31 @@ unsigned expr::id() const {
 
 unsigned expr::hash() const {
   return Z3_get_ast_hash(ctx(), ast());
+}
+
+
+ExprLeafIterator::ExprLeafIterator(const expr &init)
+  : worklist({init}), end(false) {
+  ++*this;
+}
+
+void ExprLeafIterator::operator++(void) {
+  assert(!end);
+  while (!worklist.empty()) {
+    val = move(worklist.back());
+    worklist.pop_back();
+    if (!val.isValid() || !seen.insert(val()).second)
+      continue;
+
+    expr cond, then, els;
+    if (val.isIf(cond, then, els)) {
+      worklist.emplace_back(move(then));
+      worklist.emplace_back(move(els));
+    } else {
+      return;
+    }
+  }
+  end = true;
 }
 
 }

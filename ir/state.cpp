@@ -32,13 +32,25 @@ expr State::DomainPreds::operator()() const {
   return path() && *UB();
 }
 
+void State::ValueAnalysis::intersect(const State::ValueAnalysis &other) {
+  set<const Value*> results;
+  set_intersection(non_poison_vals.begin(), non_poison_vals.end(),
+      other.non_poison_vals.begin(), other.non_poison_vals.end(),
+      inserter(results, results.begin()));
+  non_poison_vals = move(results);
+}
+
+void State::ValueAnalysis::reset() {
+  non_poison_vals.clear();
+}
+
 
 State::State(Function &f, bool source)
   : f(f), source(source), memory(*this),
     return_val(f.getType().getDummyValue(false)), return_memory(memory) {}
 
 void State::resetGlobals() {
-  Memory::resetBids(has_null_block);
+  Memory::resetGlobals();
 }
 
 const StateValue& State::exec(const Value &v) {
@@ -60,10 +72,25 @@ const StateValue& State::operator[](const Value &val) {
   auto &[sval, uvars] = val_uvars;
   (void)var;
 
+  auto simplify = [&](StateValue &sv, bool use_new_slot) -> StateValue& {
+    if (analysis.non_poison_vals.count(&val)) {
+      if (use_new_slot) {
+        assert(i_tmp_values < tmp_values.size());
+        tmp_values[i_tmp_values++] = sv;
+      }
+      assert(i_tmp_values > 0);
+      StateValue &sv_new = tmp_values[i_tmp_values - 1];
+      const expr &np = sv_new.non_poison;
+      sv_new.non_poison = np.isBool() ? true : expr::mkUInt(0, np.bits());
+      return sv_new;
+    }
+    return sv;
+  };
+
   if (uvars.empty() || !used || disable_undef_rewrite) {
     used = true;
     undef_vars.insert(uvars.begin(), uvars.end());
-    return sval;
+    return simplify(sval, true);
   }
 
   vector<pair<expr, expr>> repls;
@@ -85,7 +112,8 @@ const StateValue& State::operator[](const Value &val) {
   }
 
   assert(i_tmp_values < tmp_values.size());
-  return tmp_values[i_tmp_values++] = move(sval_new);
+  tmp_values[i_tmp_values++] = move(sval_new);
+  return simplify(tmp_values[i_tmp_values - 1], false);
 }
 
 const StateValue& State::getAndAddUndefs(const Value &val) {
@@ -95,6 +123,37 @@ const StateValue& State::getAndAddUndefs(const Value &val) {
   return v;
 }
 
+const StateValue& State::getAndAddPoisonUB(const Value &val) {
+  auto &v = (*this)[val];
+  if (!analysis.non_poison_vals.insert(&val).second)
+    return v;
+
+  // mark all operands of val as non-poison if they propagate poison
+  vector<Value*> todo;
+  if (auto i = dynamic_cast<const Instr*>(&val)) {
+    if (i->propagatesPoison())
+      todo = i->operands();
+  }
+  while (!todo.empty()) {
+    auto v = todo.back();
+    todo.pop_back();
+    if (!analysis.non_poison_vals.insert(v).second)
+      continue;
+    if (auto i = dynamic_cast<const Instr*>(v)) {
+      if (i->propagatesPoison()) {
+        auto ops = i->operands();
+        todo.insert(todo.end(), ops.begin(), ops.end());
+      }
+    }
+  }
+
+  // If val is an aggregate, all elements should be non-poison
+  addUB(v.non_poison.isBool() ? v.non_poison : v.non_poison == 0);
+  assert(i_tmp_values < tmp_values.size());
+  return tmp_values[i_tmp_values++] = { expr(v.value),
+        v.non_poison.isBool() ? true : expr::mkUInt(0, v.non_poison.bits()) };
+}
+
 const State::ValTy& State::at(const Value &val) const {
   return get<1>(values[values_map.at(&val)]);
 }
@@ -102,7 +161,7 @@ const State::ValTy& State::at(const Value &val) const {
 const OrExpr* State::jumpCondFrom(const BasicBlock &bb) const {
   auto &pres = predecessor_data.at(current_bb);
   auto I = pres.find(&bb);
-  return I == pres.end() ? nullptr : &I->second.first.path;
+  return I == pres.end() ? nullptr : &I->second.domain.path;
 }
 
 bool State::isUndef(const expr &e) const {
@@ -115,6 +174,7 @@ bool State::startBB(const BasicBlock &bb) {
   current_bb = &bb;
 
   domain.reset();
+  analysis.reset();
 
   if (&f.getFirstBB() == &bb)
     return true;
@@ -127,14 +187,21 @@ bool State::startBB(const BasicBlock &bb) {
   DisjointExpr<expr> UB;
   OrExpr path;
 
+  bool isFirst = true;
   for (auto &[src, data] : I->second) {
     (void)src;
-    auto &[dom, mem] = data;
+    auto &[dom, anlys, mem] = data;
     path.add(dom.path);
     expr p = dom.path();
     UB.add_disj(dom.UB, p);
     in_memory.add_disj(mem, move(p));
     domain.undef_vars.insert(dom.undef_vars.begin(), dom.undef_vars.end());
+
+    if (isFirst)
+      analysis = anlys;
+    else
+      analysis.intersect(anlys);
+    isFirst = false;
   }
 
   domain.path = path();
@@ -155,12 +222,13 @@ void State::addJump(const BasicBlock &dst0, expr &&cond) {
 
   cond &= domain.path;
   auto &data = predecessor_data[dst][current_bb];
-  data.second.add(memory, cond);
-  data.first.UB.add(domain.UB(), cond);
-  data.first.path.add(move(cond));
-  data.first.undef_vars.insert(undef_vars.begin(), undef_vars.end());
-  data.first.undef_vars.insert(domain.undef_vars.begin(),
-                               domain.undef_vars.end());
+  data.mem.add(memory, cond);
+  data.domain.UB.add(domain.UB(), cond);
+  data.domain.path.add(move(cond));
+  data.domain.undef_vars.insert(undef_vars.begin(), undef_vars.end());
+  data.domain.undef_vars.insert(domain.undef_vars.begin(),
+                                domain.undef_vars.end());
+  data.analysis = analysis;
 }
 
 void State::addJump(const BasicBlock &dst) {
@@ -174,13 +242,14 @@ void State::addJump(expr &&cond, const BasicBlock &dst) {
 
 void State::addCondJump(const expr &cond, const BasicBlock &dst_true,
                         const BasicBlock &dst_false) {
-  addJump(dst_true,  cond == 1);
-  addJump(dst_false, cond == 0);
+  expr cond_false = cond == 0;
+  addJump(dst_true,  !cond_false);
+  addJump(dst_false, move(cond_false));
   addUB(expr(false));
 }
 
-void State::addReturn(const StateValue &val) {
-  return_val.add(val, domain.path);
+void State::addReturn(StateValue &&val) {
+  return_val.add(move(val), domain.path);
   return_memory.add(memory, domain.path);
   return_domain.add(domain());
   function_domain.add(domain());
@@ -211,6 +280,7 @@ void State::addUB(AndExpr &&ubs) {
 }
 
 void State::addNoReturn() {
+  return_memory.add(memory, domain.path);
   function_domain.add(domain());
   return_undef_vars.insert(undef_vars.begin(), undef_vars.end());
   return_undef_vars.insert(domain.undef_vars.begin(), domain.undef_vars.end());
@@ -222,20 +292,17 @@ vector<StateValue>
 State::addFnCall(const string &name, vector<StateValue> &&inputs,
                  vector<Memory::PtrInput> &&ptr_inputs,
                  const vector<Type*> &out_types, const FnAttrs &attrs) {
-  // TODO: handle changes to memory due to fn call
   // TODO: can read/write=false fn calls be removed?
 
   bool reads_memory = !attrs.has(FnAttrs::NoRead);
   bool writes_memory = !attrs.has(FnAttrs::NoWrite);
   bool argmemonly = attrs.has(FnAttrs::ArgMemOnly);
+  bool noundef = attrs.has(FnAttrs::NoUndef);
 
-  bool all_valid = true;
-  for (auto &v : inputs) {
-    all_valid &= v.isValid();
-  }
-  for (auto &v : ptr_inputs) {
-    all_valid &= v.val.isValid();
-  }
+  bool all_valid = std::all_of(inputs.begin(), inputs.end(),
+                                [](auto &v) { return v.isValid(); }) &&
+                   std::all_of(ptr_inputs.begin(), ptr_inputs.end(),
+                                [](auto &v) { return v.val.isValid(); });
 
   if (!all_valid) {
     addUB(expr());
@@ -243,7 +310,7 @@ State::addFnCall(const string &name, vector<StateValue> &&inputs,
   }
 
   for (auto &v : ptr_inputs) {
-    if (!v.nocapture && !v.val.non_poison.isFalse())
+    if (!v.byval && !v.nocapture && !v.val.non_poison.isFalse())
       memory.escapeLocalPtr(v.val.value);
   }
 
@@ -254,21 +321,20 @@ State::addFnCall(const string &name, vector<StateValue> &&inputs,
   auto &I = call_data_pair.first;
   bool inserted = call_data_pair.second;
 
-  auto mk_val = [&](const Type &t, const string &name) {
-    if (t.isPtrType())
-      return memory.mkFnRet(name.c_str(), I->first.args_ptr);
-
-    auto v = expr::mkFreshVar(name.c_str(), t.getDummyValue(false).value);
-    return make_pair(v, v);
-  };
-
   if (inserted) {
+    auto mk_val = [&](const Type &t, const string &name) {
+      if (t.isPtrType())
+        return memory.mkFnRet(name.c_str(), I->first.args_ptr).first;
+
+      return expr::mkFreshVar(name.c_str(), t.getDummyValue(false).value);
+    };
+
     vector<StateValue> values;
     string valname = name + "#val";
     string npname = name + "#np";
     for (auto t : out_types) {
-      values.emplace_back(mk_val(*t, valname).first,
-                          expr::mkFreshVar(npname.c_str(), false));
+      expr np = noundef ? expr(true) : expr::mkFreshVar(npname.c_str(), false);
+      values.emplace_back(mk_val(*t, valname), move(np));
     }
 
     string ub_name = name + "#ub";
@@ -321,7 +387,6 @@ StateValue State::rewriteUndef(StateValue &&val, const set<expr> &undef_vars) {
 
 void State::finishInitializer() {
   is_initialization_phase = false;
-  memory.finishInitialization();
 }
 
 expr State::sinkDomain() const {
@@ -336,7 +401,7 @@ expr State::sinkDomain() const {
   OrExpr ret;
   for (auto &[src, data] : I->second) {
     (void)src;
-    ret.add(data.first.path());
+    ret.add(data.domain.path());
   }
   return ret();
 }
@@ -378,8 +443,7 @@ void State::syncSEdataWithSrc(const State &src) {
     }
   }
 
-  // The bid of tgt global starts with num_nonlocals_src
-  Memory::resetBids(num_nonlocals_src);
+  memory.syncWithSrc(src.returnMemory());
 }
 
 void State::mkAxioms(State &tgt) {
@@ -402,7 +466,7 @@ void State::mkAxioms(State &tgt) {
         auto &[ins2, ptr_ins2, mem2, reads2, argmem2] = I2->first;
         auto &[rets2, ub2, mem_state2, used2] = I2->second;
 
-        if (!used2 || reads != reads2 || argmem != argmem2)
+        if (!used2 || reads != reads2 || argmem != argmem2 || ub.eq(ub2))
           continue;
 
         expr refines(true);
@@ -414,6 +478,7 @@ void State::mkAxioms(State &tgt) {
         if (refines.isFalse())
           continue;
 
+        set<expr> undef_vars;
         for (unsigned i = 0, e = ptr_ins.size(); i != e; ++i) {
           // TODO: needs to take read/read2 as input to control if mem blocks
           // need to be compared
@@ -427,7 +492,8 @@ void State::mkAxioms(State &tgt) {
             break;
           }
           expr eq_val = Pointer(mem, ptr_in.value)
-                      .fninputRefined(Pointer(mem2, ptr_in2.value), is_byval2);
+                          .fninputRefined(Pointer(mem2, ptr_in2.value),
+                                          undef_vars, is_byval2);
           refines &= ptr_in.non_poison
                        .implies(eq_val && ptr_in2.non_poison);
 
@@ -438,14 +504,13 @@ void State::mkAxioms(State &tgt) {
         if (refines.isFalse())
           continue;
 
+        quantified_vars.insert(undef_vars.begin(), undef_vars.end());
+
         if (reads2) {
           auto restrict_ptrs = argmem2 ? &ptr_ins2 : nullptr;
-          expr mem_refined = mem.refined(mem2, true, restrict_ptrs).first;
-          refines &= mem_refined;
-          if (!mem_refined.isConst()) {
-            auto &u = mem.getUndefVars();
-            quantified_vars.insert(u.begin(), u.end());
-          }
+          auto data = mem.refined(mem2, true, restrict_ptrs);
+          refines &= get<0>(data);
+          quantified_vars.insert(get<2>(data).begin(), get<2>(data).end());
         }
 
         expr ref_expr(true);

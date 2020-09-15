@@ -27,16 +27,16 @@ using namespace util;
 using namespace std;
 
 
-static bool is_undef(const expr &e) {
+static bool is_arbitrary(const expr &e) {
   if (e.isConst())
     return false;
-  return check_expr(expr::mkForAll(e.vars(), expr::mkVar("#undef", e) != e)).
+  return check_expr(expr::mkForAll(e.vars(), expr::mkVar("#someval", e) != e)).
            isUnsat();
 }
 
 static void print_single_varval(ostream &os, State &st, const Model &m,
                                 const Value *var, const Type &type,
-                                const StateValue &val) {
+                                const StateValue &val, unsigned child) {
   if (!val.isValid()) {
     os << "(invalid expr)";
     return;
@@ -52,18 +52,18 @@ static void print_single_varval(ostream &os, State &st, const Model &m,
   }
 
   if (auto *in = dynamic_cast<const Input*>(var)) {
-    uint64_t n;
-    ENSURE(m[in->getTyVar()].isUInt(n));
-    if (n == 1) {
+    auto var = in->getUndefVar(type, child);
+    if (var.isValid() && m.eval(var, false).isAllOnes()) {
       os << "undef";
       return;
     }
-    assert(n == 0);
   }
 
+  // TODO: detect undef bits (total or partial) with an SMT query
+
   expr partial = m.eval(val.value);
-  if (is_undef(partial)) {
-    os << "undef";
+  if (is_arbitrary(partial)) {
+    os << "any";
     return;
   }
 
@@ -74,21 +74,20 @@ static void print_single_varval(ostream &os, State &st, const Model &m,
   if (!partial.isConst()) {
     // some functions / vars may not have an interpretation because it's not
     // needed, not because it's undef
-    bool found_undef = false;
     for (auto &var : partial.vars()) {
-      if ((found_undef = isUndef(var)))
+      if (isUndef(var)) {
+        os << "\t[based on undef value]";
         break;
+      }
     }
-    if (found_undef)
-      os << "\t[based on undef value]";
   }
 }
 
 static void print_varval(ostream &os, State &st, const Model &m,
                          const Value *var, const Type &type,
-                         const StateValue &val) {
+                         const StateValue &val, unsigned child = 0) {
   if (!type.isAggregateType()) {
-    print_single_varval(os, st, m, var, type, val);
+    print_single_varval(os, st, m, var, type, val, child);
     return;
   }
 
@@ -97,7 +96,8 @@ static void print_varval(ostream &os, State &st, const Model &m,
   for (unsigned i = 0, e = agg->numElementsConst(); i < e; ++i) {
     if (i != 0)
       os << ", ";
-    print_varval(os, st, m, var, agg->getChild(i), agg->extract(val, i));
+    print_varval(os, st, m, var, agg->getChild(i), agg->extract(val, i),
+                 child + i);
   }
   os << (type.isStructType() ? " }" : " >");
 }
@@ -185,8 +185,52 @@ static void error(Errors &errs, State &src_state, State &tgt_state,
 }
 
 
+static void instantiate_undef(const Input *in, map<expr, expr> &instances,
+                              map<expr, expr> &instances2, const Type &ty,
+                              unsigned child) {
+  if (auto agg = ty.getAsAggregateType()) {
+    for (unsigned i = 0, e = agg->numElementsConst(); i < e; ++i) {
+      if (!agg->isPadding(i))
+        instantiate_undef(in, instances, instances2, agg->getChild(i),
+                          child + i);
+    }
+    return;
+  }
+
+  // Bail out if it gets too big. It's unlikely we can solve it anyway.
+  if (instances.size() >= 128 || hit_half_memory_limit())
+    return;
+
+  auto var = in->getUndefVar(ty, child);
+  if (!var.isValid())
+    return;
+
+  // TODO: add support for per-bit input undef
+  assert(var.bits() == 1);
+
+  expr nums[2] = { expr::mkUInt(0, 1), expr::mkUInt(1, 1) };
+
+  for (auto &[e, v] : instances) {
+    for (unsigned i = 0; i < 2; ++i) {
+      expr newexpr = e.subst(var, nums[i]);
+      if (newexpr.eq(e)) {
+        instances2[move(newexpr)] = v;
+        break;
+      }
+
+      newexpr = newexpr.simplify();
+      if (newexpr.isFalse())
+        continue;
+
+      // keep 'var' variables for counterexample printing
+      instances2.try_emplace(move(newexpr), v && var == nums[i]);
+    }
+  }
+  instances = move(instances2);
+}
+
 static expr preprocess(Transform &t, const set<expr> &qvars0,
-                       const set<expr> &undef_qvars, expr && e) {
+                       const set<expr> &undef_qvars, expr &&e) {
   if (hit_half_memory_limit())
     return expr::mkForAll(qvars0, move(e));
 
@@ -211,57 +255,23 @@ static expr preprocess(Transform &t, const set<expr> &qvars0,
     qvars.erase(var);
   }
 
-  // TODO: maybe try to instantiate undet_xx vars?
-  if (undef_qvars.empty() || hit_half_memory_limit())
+  if (config::disable_undef_input || undef_qvars.empty() ||
+      hit_half_memory_limit())
     return expr::mkForAll(qvars, move(e));
 
-  // manually instantiate all ty_%v vars
+  // manually instantiate undef masks
   map<expr, expr> instances({ { move(e), true } });
   map<expr, expr> instances2;
 
-  expr nums[3] = { expr::mkUInt(0, 2), expr::mkUInt(1, 2), expr::mkUInt(2, 2) };
-
   for (auto &i : t.src.getInputs()) {
-    auto in = dynamic_cast<const Input*>(&i);
-    if (!in)
-      continue;
-    auto var = in->getTyVar();
-
-    for (auto &[e, v] : instances) {
-      for (unsigned i = 0; i <= 2; ++i) {
-        if (config::disable_undef_input && i == 1)
-          continue;
-        if (config::disable_poison_input && i == 2)
-          continue;
-
-        expr newexpr = e.subst(var, nums[i]);
-        if (newexpr.eq(e)) {
-          instances2[move(newexpr)] = v;
-          break;
-        }
-
-        newexpr = newexpr.simplify();
-        if (newexpr.isFalse())
-          continue;
-
-        // keep 'var' variables for counterexample printing
-        instances2.try_emplace(move(newexpr), v && var == nums[i]);
-      }
-    }
-    instances = move(instances2);
-
-    // Bail out if it gets too big. It's very likely we can't solve it anyway.
-    if (instances.size() >= 128 || hit_half_memory_limit())
-      break;
+    if (auto in = dynamic_cast<const Input*>(&i))
+      instantiate_undef(in, instances, instances2, i.getType(), 0);
   }
 
   expr insts(false);
   for (auto &[e, v] : instances) {
     insts |= expr::mkForAll(qvars, move(const_cast<expr&>(e))) && v;
   }
-
-  // TODO: try out instantiating the undefs in forall quantifier
-
   return insts;
 }
 
@@ -293,22 +303,6 @@ check_refinement(Errors &errs, Transform &t, State &src_state, State &tgt_state,
   AndExpr axioms = src_state.getAxioms();
   axioms.add(tgt_state.getAxioms());
 
-  // restrict type variable from taking disabled values
-  if (config::disable_undef_input || config::disable_poison_input) {
-    for (auto &i : t.src.getInputs()) {
-      if (auto in = dynamic_cast<const Input*>(&i)) {
-        auto var = in->getTyVar();
-        if (config::disable_undef_input) {
-          if (config::disable_poison_input)
-            axioms.add(var == 0);
-          else
-            axioms.add(var != 1);
-        } else if (config::disable_poison_input)
-          axioms.add(var.extract(1, 1) == 0);
-      }
-    }
-  }
-
   // note that precondition->toSMT() may add stuff to getPre,
   // so order here matters
   // FIXME: broken handling of transformation precondition
@@ -325,24 +319,34 @@ check_refinement(Errors &errs, Transform &t, State &src_state, State &tgt_state,
   expr axioms_expr = axioms();
   expr dom = dom_a && dom_b;
 
-  pre_tgt &= src_state.getOOM()();
   pre_tgt &= !tgt_state.sinkDomain();
-  pre_tgt &= src_state.getPre(true)();
-  pre_tgt &= tgt_state.getPre(true)();
+
+  expr pre_src_exists = pre_src, pre_src_forall = true;
+  {
+    vector<pair<expr,expr>> repls;
+    auto vars_pre = pre_src.vars();
+    for (auto &v : qvars) {
+      if (vars_pre.count(v))
+        repls.emplace_back(v, expr::mkFreshVar("#exists", v));
+    }
+    auto new_pre = pre_src.subst(repls);
+    if (!new_pre.eq(pre_src)) {
+      pre_src_exists = move(new_pre);
+      pre_src_forall = pre_src;
+    }
+  }
+  expr pre = pre_src_exists && pre_tgt;
 
   auto [poison_cnstr, value_cnstr] = type.refines(src_state, tgt_state, a, b);
 
   auto src_mem = src_state.returnMemory();
   auto tgt_mem = tgt_state.returnMemory();
-  auto [memory_cnstr0, ptr_refinement0] = src_mem.refined(tgt_mem, false);
+  auto [memory_cnstr0, ptr_refinement0, mem_undef]
+    = src_mem.refined(tgt_mem, false);
   auto &ptr_refinement = ptr_refinement0;
   auto memory_cnstr = memory_cnstr0.isTrue() ? memory_cnstr0
                                              : value_cnstr && memory_cnstr0;
-
-  if (!memory_cnstr.isConst()) {
-    auto &undef = src_mem.getUndefVars();
-    qvars.insert(undef.begin(), undef.end());
-  }
+  qvars.insert(mem_undef.begin(), mem_undef.end());
 
   if (check_expr(axioms_expr && (pre_src && pre_tgt)).isUnsat()) {
     errs.add("Precondition is always false", false);
@@ -359,15 +363,17 @@ check_refinement(Errors &errs, Transform &t, State &src_state, State &tgt_state,
     if (refines.isFalse())
       return move(refines);
 
-    auto fml = pre_tgt && pre_src.implies(refines);
-    return axioms_expr && preprocess(t, qvars, uvars, move(fml));
+    return axioms_expr &&
+            preprocess(t, qvars, uvars, pre && pre_src_forall.implies(refines));
   };
 
   auto print_ptr_load = [&](ostream &s, const Model &m) {
+    set<expr> undef;
     Pointer p(src_mem, m[ptr_refinement()]);
+    unsigned align = bits_byte / 8;
     s << "\nMismatch in " << p
-      << "\nSource value: " << Byte(src_mem, m[src_mem.load(p)()])
-      << "\nTarget value: " << Byte(tgt_mem, m[tgt_mem.load(p)()]);
+      << "\nSource value: " << Byte(src_mem, m[src_mem.load(p, undef, align)()])
+      << "\nTarget value: " << Byte(tgt_mem, m[tgt_mem.load(p, undef, align)()]);
   };
 
   expr dom_constr;
@@ -517,7 +523,7 @@ static unsigned returns_nonlocal(const Instr &inst,
 static void calculateAndInitConstants(Transform &t) {
   const auto &globals_tgt = t.tgt.getGlobalVars();
   const auto &globals_src = t.src.getGlobalVars();
-  unsigned num_globals_src = globals_src.size();
+  num_globals_src = globals_src.size();
   unsigned num_globals = num_globals_src;
 
   // FIXME: varies among address spaces
@@ -544,9 +550,14 @@ static void calculateAndInitConstants(Transform &t) {
     }
   }
 
-  unsigned num_ptrinputs = 0;
+  num_ptrinputs = 0;
   for (auto &arg : t.src.getInputs()) {
-    num_ptrinputs += num_ptrs(arg.getType());
+    auto n = num_ptrs(arg.getType());
+    if (dynamic_cast<const Input*>(&arg)->hasAttribute(ParamAttrs::ByVal)) {
+      num_globals_src += n;
+      num_globals += n;
+    } else
+      num_ptrinputs += n;
   }
 
   // The number of instructions that can return a pointer to a non-local block.
@@ -557,6 +568,7 @@ static void calculateAndInitConstants(Transform &t) {
   uint64_t max_gep_src = 0, max_gep_tgt = 0;
   uint64_t max_alloc_size = 0;
   uint64_t max_access_size = 0;
+  uint64_t min_global_size = UINT64_MAX;
 
   bool nullptr_is_used = false;
   has_int2ptr      = false;
@@ -570,12 +582,13 @@ static void calculateAndInitConstants(Transform &t) {
   does_ptr_store   = false;
   does_ptr_mem_access = false;
   does_int_mem_access = false;
+  bool does_any_byte_access = false;
 
   // Mininum access size (in bytes)
   uint64_t min_access_size = 8;
+  unsigned min_vect_elem_sz = 0;
   bool does_mem_access = false;
   bool has_ptr_load = false;
-  does_sub_byte_access = false;
   bool has_vector_bitcast = false;
 
   for (auto fn : { &t.src, &t.tgt }) {
@@ -588,11 +601,28 @@ static void calculateAndInitConstants(Transform &t) {
       auto *i = dynamic_cast<const Input *>(&v);
       if (i && i->hasAttribute(ParamAttrs::Dereferenceable)) {
         does_mem_access = true;
-        uint64_t deref_bytes = i->getAttributes().getDerefBytes();
+        uint64_t deref_bytes = i->getAttributes().derefBytes;
         min_access_size = gcd(min_access_size, deref_bytes);
         max_access_size = max(max_access_size, deref_bytes);
       }
+      if (i && i->hasAttribute(ParamAttrs::ByVal)) {
+        does_mem_access = true;
+        auto sz = i->getAttributes().blockSize;
+        max_access_size = max(max_access_size, sz);
+        min_global_size = min_global_size != UINT64_MAX
+                            ? gcd(sz, min_global_size)
+                            : sz;
+        min_global_size = gcd(min_global_size, i->getAttributes().align);
+      }
     }
+
+    auto update_min_vect_sz = [&](const Type &ty) {
+      auto elemsz = minVectorElemSize(ty);
+      if (min_vect_elem_sz && elemsz)
+        min_vect_elem_sz = gcd(min_vect_elem_sz, elemsz);
+      else if (elemsz)
+        min_vect_elem_sz = elemsz;
+    };
 
     set<pair<Value*, uint64_t>> nonlocal_cache;
     for (auto BB : fn->getBBs()) {
@@ -604,37 +634,36 @@ static void calculateAndInitConstants(Transform &t) {
 
         for (auto op : i.operands()) {
           nullptr_is_used |= has_nullptr(op);
+          update_min_vect_sz(op->getType());
         }
 
-        if (auto *fc = dynamic_cast<const FnCall*>(&i)) {
+        update_min_vect_sz(i.getType());
+
+        if (dynamic_cast<const FnCall*>(&i))
           has_fncall |= true;
-          has_free   |= !fc->getAttributes().has(FnAttrs::NoFree);
-        }
 
         if (auto *mi = dynamic_cast<const MemInstr *>(&i)) {
           max_alloc_size  = max(max_alloc_size, mi->getMaxAllocSize());
           max_access_size = max(max_access_size, mi->getMaxAccessSize());
           cur_max_gep     = add_saturate(cur_max_gep, mi->getMaxGEPOffset());
+          has_free       |= mi->canFree();
 
           auto info = mi->getByteAccessInfo();
           has_ptr_load         |= info.doesPtrLoad;
           does_ptr_store       |= info.doesPtrStore;
           does_int_mem_access  |= info.hasIntByteAccess;
-          does_ptr_mem_access  |= info.hasPtrByteAccess;
-          does_sub_byte_access |= info.hasSubByteAccess;
           does_mem_access      |= info.doesMemAccess();
           min_access_size       = gcd(min_access_size, info.byteSize);
+          if (info.doesMemAccess() && !info.hasIntByteAccess &&
+              !info.doesPtrLoad && !info.doesPtrStore)
+            does_any_byte_access = true;
 
           if (auto alloc = dynamic_cast<const Alloc*>(&i)) {
             has_alloca = true;
             has_dead_allocas |= alloc->initDead();
-          }
-          else if (auto alloc = dynamic_cast<const Malloc*>(&i)) {
-            has_malloc  = true;
-            has_free   |= alloc->isRealloc();
           } else {
-            has_malloc |= dynamic_cast<const Calloc*>(&i) != nullptr;
-            has_free   |= dynamic_cast<const Free*>(&i) != nullptr;
+            has_malloc |= dynamic_cast<const Malloc*>(&i) != nullptr ||
+                          dynamic_cast<const Calloc*>(&i) != nullptr;
           }
 
         } else if (isCast(ConversionOp::Int2Ptr, i) ||
@@ -646,15 +675,19 @@ static void calculateAndInitConstants(Transform &t) {
         } else if (auto *bc = isCast(ConversionOp::BitCast, i)) {
           auto &t = bc->getType();
           has_vector_bitcast |= t.isVectorType();
-          does_sub_byte_access |= hasSubByte(t);
           min_access_size = gcd(min_access_size, getCommonAccessSize(t));
         }
       }
     }
   }
+
+  does_ptr_mem_access = has_ptr_load || does_ptr_store;
+  if (does_any_byte_access && !does_int_mem_access && !does_ptr_mem_access)
+    // Use int bytes only
+    does_int_mem_access = true;
+
   unsigned num_locals = max(num_locals_src, num_locals_tgt);
 
-  uint64_t min_global_size = UINT64_MAX;
   for (auto glbs : { &globals_src, &globals_tgt }) {
     for (auto &glb : *glbs) {
       auto sz = max(glb->size(), (uint64_t)1u);
@@ -671,14 +704,7 @@ static void calculateAndInitConstants(Transform &t) {
   has_null_block = num_ptrinputs > 0 || nullptr_is_used || has_malloc ||
                   has_ptr_load || has_fncall;
 
-  // + 1 is sufficient to give 1 degree of freedom for the target to trigger UB
-  // in case a different pointer from source is produced.
-  auto num_max_nonlocals_inst
-    = max(num_nonlocals_inst_src, num_nonlocals_inst_tgt);
-  if (num_nonlocals_inst_src && num_nonlocals_inst_tgt)
-    ++num_max_nonlocals_inst;
-
-  num_nonlocals_src = num_globals_src + num_ptrinputs + num_max_nonlocals_inst +
+  num_nonlocals_src = num_globals_src + num_ptrinputs + num_nonlocals_inst_src +
                       has_null_block;
 
   // Allow at least one non-const global for calls to change
@@ -701,7 +727,6 @@ static void calculateAndInitConstants(Transform &t) {
   };
   // The number of bits needed to encode pointer attributes
   // nonnull and byval isn't encoded in ptr attribute bits
-  bool has_byval = has_attr(ParamAttrs::ByVal);
   has_nocapture = has_attr(ParamAttrs::NoCapture);
   has_readonly = has_attr(ParamAttrs::ReadOnly);
   has_readnone = has_attr(ParamAttrs::ReadNone);
@@ -738,10 +763,13 @@ static void calculateAndInitConstants(Transform &t) {
       }
     }
   }
-  if (has_byval)
-    min_access_size = 1;
   bits_byte = 8 * ((does_mem_access || num_globals != 0)
                      ? (unsigned)min_access_size : 1);
+
+  bits_poison_per_byte = 1;
+  if (min_vect_elem_sz > 0)
+    bits_poison_per_byte = (min_vect_elem_sz % 8) ? bits_byte :
+                             bits_byte / gcd(bits_byte, min_vect_elem_sz);
 
   strlen_unroll_cnt = 10;
   memcmp_unroll_cnt = 10;
@@ -749,8 +777,7 @@ static void calculateAndInitConstants(Transform &t) {
   little_endian = t.src.isLittleEndian();
 
   if (config::debug)
-    config::dbg() << "num_max_nonlocals_inst: " << num_max_nonlocals_inst
-                  << "\nnum_locals_src: " << num_locals_src
+    config::dbg() << "\nnum_locals_src: " << num_locals_src
                   << "\nnum_locals_tgt: " << num_locals_tgt
                   << "\nnum_nonlocals_src: " << num_nonlocals_src
                   << "\nnum_nonlocals: " << num_nonlocals
@@ -762,6 +789,7 @@ static void calculateAndInitConstants(Transform &t) {
                   << "\nmin_access_size: " << min_access_size
                   << "\nmax_access_size: " << max_access_size
                   << "\nbits_byte: " << bits_byte
+                  << "\nbits_poison_per_byte: " << bits_poison_per_byte
                   << "\nstrlen_unroll_cnt: " << strlen_unroll_cnt
                   << "\nmemcmp_unroll_cnt: " << memcmp_unroll_cnt
                   << "\nlittle_endian: " << little_endian
@@ -775,7 +803,6 @@ static void calculateAndInitConstants(Transform &t) {
                   << "\ndoes_mem_access: " << does_mem_access
                   << "\ndoes_ptr_mem_access: " << does_ptr_mem_access
                   << "\ndoes_int_mem_access: " << does_int_mem_access
-                  << "\ndoes_sub_byte_access: " << does_sub_byte_access
                   << '\n';
 }
 
@@ -915,7 +942,7 @@ TypingAssignments TransformVerify::getTypings() const {
   if (check_each_var) {
     for (auto &i : t.src.instrs()) {
       if (!i.isVoid())
-        c &= i.eqType(*tgt_instrs.at(i.getName()));
+        c &= i.getType() == tgt_instrs.at(i.getName())->getType();
     }
   }
   return { move(c) };
@@ -975,9 +1002,14 @@ static map<string_view, Instr*> can_remove_init(Function &fn) {
         continue;
       }
 
+      // if (p == @const) read(load p) ; this should read @const (or raise UB)
+      if (dynamic_cast<ICmp*>(user)) {
+        needed = true;
+        break;
+      }
+
       // no useful users
-      if (dynamic_cast<ICmp*>(user) ||
-          dynamic_cast<Return*>(user))
+      if (dynamic_cast<Return*>(user))
         continue;
 
       if (dynamic_cast<MemInstr*>(user) && !dynamic_cast<GEP*>(user)) {
@@ -1073,7 +1105,9 @@ void Transform::preprocess(unsigned unroll_factor) {
         to_remove.clear();
       }
 
-      changed |= fn->removeUnusedStuff(users);
+      changed |=
+        fn->removeUnusedStuff(users, fn == &src ? vector<string_view>()
+                                                : src.getGlobalVarNames());
     } while (changed);
   }
 

@@ -2,6 +2,7 @@
 // Distributed under the MIT license that can be found in the LICENSE file.
 
 #include "llvm_util/llvm2alive.h"
+#include "ir/memory.h"
 #include "smt/smt.h"
 #include "tools/transform.h"
 #include "util/config.h"
@@ -76,6 +77,14 @@ static llvm::cl::list<std::string> opt_funcs(
     llvm::cl::ZeroOrMore, llvm::cl::value_desc("function name"),
     llvm::cl::cat(opt_alive));
 
+static llvm::cl::opt<std::string> opt_src_fn(
+    "src-fn", llvm::cl::desc("Name of src function (without @)"),
+    llvm::cl::cat(opt_alive), llvm::cl::init("src"));
+
+static llvm::cl::opt<std::string> opt_tgt_fn(
+    "tgt-fn", llvm::cl::desc("Name of tgt function (without @)"),
+    llvm::cl::cat(opt_alive), llvm::cl::init("tgt"));
+
 static llvm::cl::opt<bool> opt_tactic_verbose(
     "tactic-verbose", llvm::cl::desc("SMT Tactic verbose mode"),
     llvm::cl::cat(opt_alive), llvm::cl::init(false));
@@ -86,6 +95,10 @@ static llvm::cl::opt<bool> opt_debug(
 
 static llvm::cl::opt<bool> opt_smt_stats(
     "smt-stats", llvm::cl::desc("Show SMT statistics"),
+    llvm::cl::cat(opt_alive), llvm::cl::init(false));
+
+static llvm::cl::opt<bool> opt_alias_stats(
+    "alias-stats", llvm::cl::desc("Show alias sets statistics"),
     llvm::cl::cat(opt_alive), llvm::cl::init(false));
 
 static llvm::cl::opt<bool> opt_succinct(
@@ -230,12 +243,14 @@ static int cmpTypes(llvm::Type *TyL, llvm::Type *TyR,
   case llvm::Type::FixedVectorTyID: {
     auto *STyL = llvm::cast<llvm::VectorType>(TyL);
     auto *STyR = llvm::cast<llvm::VectorType>(TyR);
-    if (STyL->getElementCount().Scalable != STyR->getElementCount().Scalable)
-      return cmpNumbers(STyL->getElementCount().Scalable,
-                        STyR->getElementCount().Scalable);
-    if (STyL->getElementCount().Min != STyR->getElementCount().Min)
-      return cmpNumbers(STyL->getElementCount().Min,
-                        STyR->getElementCount().Min);
+    if (STyL->getElementCount().isScalable() !=
+        STyR->getElementCount().isScalable())
+      return cmpNumbers(STyL->getElementCount().isScalable(),
+                        STyR->getElementCount().isScalable());
+    if (STyL->getElementCount().getKnownMinValue() !=
+        STyR->getElementCount().getKnownMinValue())
+      return cmpNumbers(STyL->getElementCount().getKnownMinValue(),
+                        STyR->getElementCount().getKnownMinValue());
     return cmpTypes(STyL->getElementType(), STyR->getElementType(), FnL, FnR);
   }
   }
@@ -423,6 +438,7 @@ convenient way to demonstrate an existing optimizer bug.
   }
 
   auto &DL = M1.get()->getDataLayout();
+  auto targetTriple = llvm::Triple(M1.get()->getTargetTriple());
 
   llvm_util::initializer llvm_util_init(cerr, DL);
   smt_init.emplace();
@@ -431,15 +447,9 @@ convenient way to demonstrate an existing optimizer bug.
 
   unique_ptr<llvm::Module> M2;
   if (opt_file2.empty()) {
-    auto SRC = findFunction(*M1, "src");
-    auto TGT = findFunction(*M1, "tgt");
+    auto SRC = findFunction(*M1, opt_src_fn);
+    auto TGT = findFunction(*M1, opt_tgt_fn);
     if (SRC && TGT) {
-      auto &DL = M1.get()->getDataLayout();
-      auto targetTriple = llvm::Triple(M1.get()->getTargetTriple());
-
-      llvm_util::initializer llvm_util_init(cerr, DL);
-      smt_init.emplace();
-
       compareFunctions(*SRC, *TGT, targetTriple, goodCount, badCount,
                        errorCount);
       goto end;
@@ -463,7 +473,6 @@ convenient way to demonstrate an existing optimizer bug.
   {
   set<string> funcNames(opt_funcs.begin(), opt_funcs.end());
 
-  auto targetTriple = llvm::Triple(M1.get()->getTargetTriple());
   // FIXME: quadratic, may not be suitable for very large modules
   // emitted by opt-fuzz
   for (auto &F1 : *M1.get()) {
@@ -491,6 +500,9 @@ end:
     smt::solver_print_stats(cout);
 
   smt_init.reset();
+
+  if (opt_alias_stats)
+    IR::Memory::printAliasStats(cout);
 
   return errorCount > 0;
 }

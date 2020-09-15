@@ -25,7 +25,7 @@ VoidType Type::voidTy;
 
 unsigned Type::np_bits() const {
   auto bw = bits();
-  return does_sub_byte_access ? bw : (unsigned)divide_up(bw, bits_byte);
+  return min(bw, (unsigned)divide_up(bw * bits_poison_per_byte, bits_byte));
 }
 
 expr Type::var(const char *var, unsigned bits) const {
@@ -248,10 +248,9 @@ expr Type::combine_poison(const expr &boolean, const expr &orig) const {
     expr::mkIf(boolean, expr::mkInt(0, orig), expr::mkInt(-1, orig)) | orig;
 }
 
-pair<expr, vector<expr>>
-Type::mkUndefInput(State &s, const ParamAttrs &attrs) const {
+pair<expr, expr> Type::mkUndefInput(State &s, const ParamAttrs &attrs) const {
   auto var = expr::mkFreshVar("undef", mkInput(s, "", attrs));
-  return { var, { var } };
+  return { var, var };
 }
 
 ostream& operator<<(ostream &os, const Type &t) {
@@ -358,7 +357,7 @@ void IntType::printVal(ostream &os, State &s, const expr &e) const {
   e.printHexadecimal(os);
   os << " (";
   e.printUnsigned(os);
-  if (e.bits() > 1 && e.isSigned()) {
+  if (e.bits() > 1 && e.isNegative().isTrue()) {
     os << ", ";
     e.printSigned(os);
   }
@@ -657,10 +656,9 @@ expr PtrType::mkInput(State &s, const char *name,
   return s.getMemory().mkInput(name, attrs);
 }
 
-pair<expr, vector<expr>>
+pair<expr, expr>
 PtrType::mkUndefInput(State &s, const ParamAttrs &attrs) const {
-  auto [val, var] = s.getMemory().mkUndefInput(attrs);
-  return { move(val), { move(var) } };
+  return s.getMemory().mkUndefInput(attrs);
 }
 
 void PtrType::printVal(ostream &os, State &s, const expr &e) const {
@@ -724,12 +722,11 @@ expr AggregateType::numElementsExcludingPadding() const {
   return numElements() - expr::mkInt(numPaddingsConst(), elems);
 }
 
-StateValue AggregateType::aggregateVals(const vector<StateValue> &vals,
-                                        bool needsPadding) const {
-  assert(vals.size() + (needsPadding ? numPaddingsConst() : 0) == elements);
+StateValue AggregateType::aggregateVals(const vector<StateValue> &vals) const {
+  assert(vals.size() + numPaddingsConst() == elements);
   // structs can be empty
-  if (vals.empty() && !needsPadding)
-    return { expr::mkUInt(0, 1), true };
+  if (elements == 0)
+    return { expr::mkUInt(0, 1), expr::mkUInt(1, 1) };
 
   StateValue v;
   bool first = true;
@@ -742,7 +739,7 @@ StateValue AggregateType::aggregateVals(const vector<StateValue> &vals,
     }
 
     StateValue vv;
-    if (needsPadding && isPadding(idx))
+    if (isPadding(idx))
       vv = children[idx]->getDummyValue(false);
     else
       vv = vals[val_idx++];
@@ -756,9 +753,6 @@ StateValue AggregateType::aggregateVals(const vector<StateValue> &vals,
 StateValue
 AggregateType::extract(const StateValue &val, unsigned index, bool fromInt)
     const {
-  if (children[index]->bits() == 0)
-    return { expr::mkUInt(0, 1), true };
-
   unsigned total_value = 0, total_np = 0;
   for (unsigned i = 0; i < index; ++i) {
     total_value += children[i]->bits();
@@ -789,6 +783,10 @@ AggregateType::extract(const StateValue &val, unsigned index, bool fromInt)
 }
 
 unsigned AggregateType::bits() const {
+  if (elements == 0)
+    // It is set as 1 because zero-width bitvector is invalid.
+    return 1;
+
   unsigned bw = 0;
   for (unsigned i = 0; i < elements; ++i) {
     bw += children[i]->bits();
@@ -797,6 +795,10 @@ unsigned AggregateType::bits() const {
 }
 
 unsigned AggregateType::np_bits() const {
+  if (elements == 0)
+    // It is set as 1 because zero-width bitvector is invalid.
+    return 1;
+
   unsigned bw = 0;
   for (unsigned i = 0; i < elements; ++i) {
     bw += children[i]->np_bits();
@@ -805,12 +807,10 @@ unsigned AggregateType::np_bits() const {
 }
 
 StateValue AggregateType::getDummyValue(bool non_poison) const {
-  if (elements == 0)
-    return { expr::mkUInt(0, 1), expr::mkUInt(non_poison, 1) };
-
   vector<StateValue> vals;
   for (unsigned i = 0; i < elements; ++i) {
-    vals.emplace_back(children[i]->getDummyValue(non_poison));
+    if (!isPadding(i))
+      vals.emplace_back(children[i]->getDummyValue(non_poison));
   }
   return aggregateVals(vals);
 }
@@ -891,7 +891,7 @@ expr AggregateType::toInt(State &s, expr v) const {
 StateValue AggregateType::toInt(State &s, StateValue v) const {
   // structs can be empty
   if (elements == 0)
-    return { expr::mkUInt(0, 1), true };
+    return { expr::mkUInt(0, 1), expr::mkUInt(1, 1) };
 
   StateValue ret;
   for (unsigned i = 0; i < elements; ++i) {
@@ -927,28 +927,7 @@ AggregateType::refines(State &src_s, State &tgt_s, const StateValue &src,
 
 expr AggregateType::mkInput(State &s, const char *name,
                             const ParamAttrs &attrs) const {
-  expr val;
-  for (unsigned i = 0; i < elements; ++i) {
-    string c_name = string(name) + "#" + to_string(i);
-    auto v = children[i]->mkInput(s, c_name.c_str(), attrs);
-    v = children[i]->toBV(move(v));
-    val = i == 0 ? move(v) : val.concat(v);
-  }
-  return val;
-}
-
-pair<expr, vector<expr>>
-AggregateType::mkUndefInput(State &s, const ParamAttrs &attrs) const {
-  expr val;
-  vector<expr> vars;
-
-  for (unsigned i = 0; i < elements; ++i) {
-    auto [v, vs] = children[i]->mkUndefInput(s, attrs);
-    v = children[i]->toBV(move(v));
-    val = i == 0 ? move(v) : val.concat(v);
-    vars.insert(vars.end(), vs.begin(), vs.end());
-  }
-  return { move(val), move(vars) };
+  UNREACHABLE();
 }
 
 unsigned AggregateType::numPointerElements() const {
@@ -1064,6 +1043,12 @@ StateValue VectorType::update(const StateValue &vector,
                   (vector.non_poison & mask_np) | np_shifted});
 }
 
+unsigned VectorType::np_bits() const {
+  if (getChild(0).isPtrType())
+    return elements;
+  return Type::np_bits();
+}
+
 expr VectorType::getTypeConstraints() const {
   auto &elementTy = *children[0];
   expr r = AggregateType::getTypeConstraints() &&
@@ -1119,9 +1104,6 @@ const StructType* StructType::getAsStructType() const {
 }
 
 void StructType::print(ostream &os) const {
-  if (!elements)
-    return;
-
   os << '{';
   for (unsigned i = 0; i < elements; ++i) {
     if (i != 0)
@@ -1375,7 +1357,7 @@ expr SymbolicType::mkInput(State &st, const char *name,
   DISPATCH(mkInput(st, name, attrs), UNREACHABLE());
 }
 
-pair<expr, vector<expr>>
+pair<expr, expr>
 SymbolicType::mkUndefInput(State &st, const ParamAttrs &attrs) const {
   DISPATCH(mkUndefInput(st, attrs), UNREACHABLE());
 }
@@ -1407,23 +1389,33 @@ bool isNonPtrVector(const Type &t) {
   return vty && !vty->getChild(0).isPtrType();
 }
 
-bool hasSubByte(const Type &t) {
+unsigned minVectorElemSize(const Type &t) {
   if (auto agg = t.getAsAggregateType()) {
     if (t.isVectorType()) {
       auto &elemTy = agg->getChild(0);
-      return elemTy.isPtrType() ? false : (elemTy.bits() % 8);
+      return elemTy.isPtrType() ? IR::bits_program_pointer : elemTy.bits();
     }
 
+    unsigned val = 0;
     for (unsigned i = 0, e = agg->numElementsConst(); i != e;  ++i) {
-      if (hasSubByte(agg->getChild(i)))
-        return true;
+      if (auto ch = minVectorElemSize(agg->getChild(i))) {
+        val = val ? gcd(val, ch) : ch;
+      }
     }
+    return val;
   }
-  return false;
+  return 0;
 }
 
 uint64_t getCommonAccessSize(const IR::Type &ty) {
   if (auto agg = ty.getAsAggregateType()) {
+    // non-pointer vectors are stored/loaded all at once
+    if (agg->isVectorType()) {
+      auto &elemTy = agg->getChild(0);
+      if (!elemTy.isPtrType())
+        return divide_up(agg->numElementsConst() * elemTy.bits(), 8);
+    }
+
     uint64_t sz = 1;
     for (unsigned i = 0, e = agg->numElementsConst(); i != e; ++i) {
       auto n = getCommonAccessSize(agg->getChild(i));

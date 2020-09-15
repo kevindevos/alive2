@@ -13,7 +13,7 @@ Alive2 includes the following libraries:
 Included tools:
 * Alive drop-in replacement
 * Translation validation plugins for clang and LLVM's `opt`
-* Standalone translation validation tool: `alive-tv`
+* Standalone translation validation tool: `alive-tv` ([online](https://alive2.llvm.org))
 
 
 WARNING
@@ -60,7 +60,7 @@ cmake -GNinja -DLLVM_ENABLE_RTTI=ON -DLLVM_ENABLE_EH=ON -DBUILD_SHARED_LIBS=ON -
 
 Alive2 should then be configured as follows:
 ```
-cmake -GNinja -DLLVM_DIR=~/llvm/build/lib/cmake/llvm -DBUILD_TV=1 -DCMAKE_BUILD_TYPE=Release ..
+cmake -GNinja -DCMAKE_PREFIX_PATH=~/llvm/build -DBUILD_TV=1 -DCMAKE_BUILD_TYPE=Release ..
 ```
 
 If you want to use Alive2 as a clang plugin, add `-DCLANG_PLUGIN=1` to the
