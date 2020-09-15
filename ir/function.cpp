@@ -385,9 +385,6 @@ void LoopTree::vecsetUnion(unsigned from, unsigned to) {
 void LoopTree::buildLoopTree() {
   vector<bool> visited; // bb id -> visited
 
-  // used in DFS to override sucessor list of a bb when fix_loops added new bbs
-  unordered_map<const BasicBlock*, vector<const BasicBlock*>> succ_override;
-
   vecsets_data.reserve(f.getBBs().size());
 
   auto bb_id = [&](const BasicBlock *bb) {
@@ -447,22 +444,15 @@ void LoopTree::buildLoopTree() {
         dfs_work_list.push(cur_bb);
 
         // add sucessors to work_list if not visited
-        auto &succ_overr = succ_override[cur_bb];
-        if (succ_overr.empty()) {
-          if (auto instr = dynamic_cast<const JumpInstr*>(&cur_bb->back())) {
-            auto tgt_it = const_cast<JumpInstr*>(instr)->targets();
-            auto first_it = true;
-            for (auto I = tgt_it.begin(), E = tgt_it.end(); I != E; ++I) {
-              auto [cond, bb] = I.get();
-              bool is_default = dynamic_cast<const Switch*>(instr) && first_it;
-              try_push_worklist(bb, n, cond, is_default);
-              first_it = false;
-            }
+        if (auto instr = dynamic_cast<const JumpInstr*>(&cur_bb->back())) {
+          auto tgt_it = const_cast<JumpInstr*>(instr)->targets();
+          auto first_it = true;
+          for (auto I = tgt_it.begin(), E = tgt_it.end(); I != E; ++I) {
+            auto [cond, bb] = I.get();
+            bool is_default = dynamic_cast<const Switch*>(instr) && first_it;
+            try_push_worklist(bb, n, cond, is_default);
+            first_it = false;
           }
-        } else {
-          // if new bbs were added from fix_loops, use succ_overr instead
-          for (auto succ : succ_overr)
-            try_push_worklist(succ, n, nullptr, false); // TODO remove
         }
       } else {
         last[number[n]] = current - 1;
@@ -637,13 +627,10 @@ void LoopTree::printDot(std::ostream &os) const {
     "none", "nonheader", "self", "reducible", "irreducible"
   };
 
-  // temporary print loop sets
+  // print loop sets
   for (auto &n : loop_header_ids) {
     auto &n_loop_data = loop_data[n];
-    auto &n_data = node_data[n];
     auto bb = n;
-    if (n_data.added_in_fix_loops)
-      bb = n_loop_data.alternate_headers.front();
 
     cout << bb_dot_name(node_data[bb].bb->getName()) << " -> (";
     for (auto el : n_loop_data.nodes) {

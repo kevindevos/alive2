@@ -216,7 +216,6 @@ public:
     unsigned header;
     std::optional<unsigned> first_header;
     LHeaderType type;
-    bool added_in_fix_loops;
   };
 
   struct LoopData {
