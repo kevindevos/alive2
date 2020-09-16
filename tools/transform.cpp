@@ -1546,9 +1546,9 @@ void Transform::preprocess(unsigned unroll_factor) {
           }
 
           auto &phi_ref = unroll_data[id].phi_ref;
-          unordered_set<unsigned> preds;
+          unordered_map<unsigned, bool> preds;
           for (auto &p : lt.node_data[id].preds)
-            preds.insert(unroll_data[get<1>(p)].first_original);
+            preds.emplace(unroll_data[get<1>(p)].first_original, get<2>(p));
 
           vector<string> todo;
           for (auto &i : bb->instrs()) {
@@ -1556,7 +1556,8 @@ void Transform::preprocess(unsigned unroll_factor) {
               auto &phi_entry = phi_ref[phi];
               for (auto &[val, bb_name] : phi->getValues()) {
                 auto pred_id = lt.bb_map[&fn->getBB(bb_name)];
-                auto to_remove = !preds.count(pred_id);
+                auto I = preds.find(pred_id);
+                auto to_remove = I == preds.end() || I->second;
                 if (to_remove) {
                   if (bb != orig_bb)
                     todo.emplace_back(bb_name);
@@ -1786,7 +1787,8 @@ next_duped_instr:;
                 auto orig_pred = unroll_data[get<1>(pred)].first_original;
                 auto I = entries.find(orig_pred);
                 if (I != entries.end()) {
-                  if (get<1>(pred) == orig_pred && !I->second.second)
+                  if (get<2>(pred) || (get<1>(pred) == orig_pred &&
+                                       !I->second.second))
                     continue;
                 }
 
