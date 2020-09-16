@@ -1329,7 +1329,8 @@ void Transform::preprocess(unsigned unroll_factor) {
           } else {
             instr->addTarget(cond, *dst_);
           }
-          dst_data.preds.emplace_back(cond, src, to_sink);
+          if (!to_sink)
+            dst_data.preds.emplace_back(cond, src, false);
           lt.node_data[src].succs.emplace_back(dst, cond, to_sink, is_default);
         }
         return pred_to_erase;
@@ -1677,7 +1678,10 @@ void Transform::preprocess(unsigned unroll_factor) {
           unordered_set<Value*> seen_uses;
           vector<unique_ptr<Phi>> to_insert;
 
-          if (merge_data.preds.size() > 1) {
+          unordered_set<unsigned> unique_preds;
+          for (auto &p : merge_data.preds)
+            unique_preds.insert(get<1>(p));
+          if (unique_preds.size() > 1) {
             // get range of preds in topological order
             unsigned max = 0;
             unsigned min = bbs.size();
