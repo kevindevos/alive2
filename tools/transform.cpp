@@ -1548,7 +1548,7 @@ void Transform::preprocess(unsigned unroll_factor) {
           auto &phi_ref = unroll_data[id].phi_ref;
           unordered_set<unsigned> preds;
           for (auto &p : lt.node_data[id].preds)
-            preds.insert(get<1>(p));
+            preds.insert(unroll_data[get<1>(p)].first_original);
 
           vector<string> todo;
           for (auto &i : bb->instrs()) {
