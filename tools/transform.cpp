@@ -1578,7 +1578,7 @@ void Transform::preprocess(unsigned unroll_factor) {
           bbs_top_order.emplace_back(id);
         }
 
-        // add phis where needed
+        // add phis into merge exits when needed
         auto users = fn->getUsers();
         vector<pair<unsigned, unique_ptr<Phi>>> to_add;
         for (auto loop_hdr : lt.loop_header_ids) {
@@ -1594,8 +1594,9 @@ void Transform::preprocess(unsigned unroll_factor) {
               for (auto I = uses.first, E = uses.second; I != E; ++I) {
                 auto cbbid = lt.bb_map[*((Instr*) I->second)->containingBB()];
 
-                // if use not in loop add phi
+                // if found use not in loop add phi and stop
                 if (!in_loop(cbbid, loop_hdr)) {
+                  bool added_phi = false;
                   for (auto merge : merge_exits) {
                     if (is_ancestor(merge, cbbid)) {
                       auto &bb_name = lt.node_data[merge].bb->getName();
@@ -1607,8 +1608,11 @@ void Transform::preprocess(unsigned unroll_factor) {
                       // topologically after topsort
                       phi_use[&(*phi_)] = val;
                       unroll_data[merge].added_phi.emplace_back(val,  &(*phi_));
+                      added_phi = true;
                     }
                   }
+                  if (added_phi)
+                    break;
                 }
               }
             }
