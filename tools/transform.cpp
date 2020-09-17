@@ -1135,6 +1135,8 @@ void Transform::preprocess(unsigned unroll_factor) {
     unordered_map<Value*, unordered_map<unsigned, Value*>> phi_ref;
     // keep track of added phis in original bbs
     vector<pair<Value*, Value*>> added_phi;
+    // original nodes of loop before unroll
+    vector<unsigned> original_loop_nodes;
   };
 
   if (k > 0) {
@@ -1403,15 +1405,17 @@ void Transform::preprocess(unsigned unroll_factor) {
         return found;
       };
 
-      // identify merge exits for each loop
+      // identify merge exits for each loop and store original loop nodes
       for (auto loop_hdr : lt.loop_header_ids) {
         auto &merge_exits = loop_merge_exits[loop_hdr];
-        for (auto id : lt.loop_data[loop_hdr].nodes)
+        auto &original_lnodes = unroll_data[loop_hdr].original_loop_nodes;
+        for (auto id : lt.loop_data[loop_hdr].nodes) {
+          original_lnodes.emplace_back(id);
           for (auto &succ : lt.node_data[id].succs)
             if (!in_loop(get<0>(succ), loop_hdr))
               merge_exits.insert(get<0>(succ));
+        }
       }
-
 
       // LOOP UNROLL
       top_order_idx.clear();
@@ -1580,7 +1584,7 @@ void Transform::preprocess(unsigned unroll_factor) {
         for (auto loop_hdr : lt.loop_header_ids) {
           auto &merge_exits = loop_merge_exits[loop_hdr];
 
-          for (auto id : lt.loop_data[loop_hdr].nodes) {
+          for (auto id : unroll_data[loop_hdr].original_loop_nodes) {
             auto bb = lt.node_data[id].bb;
             for (auto &instr : bb->instrs()) {
               if (&instr == &bb->back())
