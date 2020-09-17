@@ -1740,7 +1740,6 @@ void Transform::preprocess(unsigned unroll_factor) {
           return updated_val;
         };
 
-        unordered_map<Value*, Value*> phi_use;
         users = fn->getUsers();
         top_order_idx.resize(lt.node_data.size());
         for (auto merge : bbs_top_order) {
