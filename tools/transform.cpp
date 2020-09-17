@@ -1527,8 +1527,11 @@ void Transform::preprocess(unsigned unroll_factor) {
           bbs.emplace_back(bb);
           top_order_idx[id] = bbs_top_order.size();
           bbs_top_order.emplace_back(id);
+        }
 
-          // instr duping and keep dupes in topological order
+        // dupe instrs in topological order and build phi reference
+        for (auto id : bbs_top_order) {
+          auto bb = lt.node_data[id].bb;
           auto orig_bb = lt.node_data[unroll_data[id].first_original].bb;
           if (unroll_data[id].first_original != id) {
             auto back_instr = bb->delInstr(&bb->back());
@@ -1573,6 +1576,7 @@ void Transform::preprocess(unsigned unroll_factor) {
             }
           }
         }
+
         // remove phi entries from original bb after all dupes have been
         // processed in topsort (they require original as reference)
         for (auto [phi, bb_name] : todo_original)
