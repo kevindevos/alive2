@@ -1618,7 +1618,6 @@ void Transform::preprocess(unsigned unroll_factor) {
         // update BB_order in function for the desired topological order
         vector<unsigned> bbs_top_order;
         vector<pair<Phi*, string>> todo_original;
-        vector<unsigned> top_order_idx;
         top_order_idx.resize(lt.node_data.size());
         auto &bbs = fn->getBBs();
         bbs.clear();
