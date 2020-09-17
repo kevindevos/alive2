@@ -1131,10 +1131,8 @@ void Transform::preprocess(unsigned unroll_factor) {
     unsigned num_preds_changed_to_sink;
     // suffix for bb name
     string suffix;
-    // phis and entries to keep track of for operand updates as entries may
-    // be removed but kept track of for reference
-    // phi -> < <value, bbid, removed>
-    unordered_map<Value*, unordered_map<unsigned, pair<Value*, bool>>> phi_ref;
+    // phis and entries to keep track of for operand updates phi -> <val, bb>
+    unordered_map<Value*, unordered_map<unsigned, Value*>> phi_ref;
   };
 
   if (k > 0) {
@@ -1554,25 +1552,11 @@ void Transform::preprocess(unsigned unroll_factor) {
           for (auto &p : lt.node_data[id].preds)
             preds.emplace(unroll_data[get<1>(p)].first_original, get<2>(p));
 
-          vector<string> todo;
           for (auto &i : bb->instrs()) {
             if (auto phi = dynamic_cast<Phi*>(const_cast<Instr*>(&i))) {
               auto &phi_entry = phi_ref[phi];
-              for (auto &[val, bb_name] : phi->getValues()) {
-                auto pred_id = lt.bb_map[&fn->getBB(bb_name)];
-                auto I = preds.find(pred_id);
-                auto to_remove = I == preds.end() || I->second;
-                if (to_remove) {
-                  if (bb != orig_bb)
-                    todo.emplace_back(bb_name);
-                  else
-                    todo_original.emplace_back(phi, bb_name);
-                }
-                phi_entry.try_emplace(pred_id, val, to_remove);
-              }
-              for (auto &name : todo)
-                phi->removeValue(name);
-              todo.clear();
+              for (auto &[val, bb_name] : phi->getValues())
+                phi_entry.try_emplace(lt.bb_map[&fn->getBB(bb_name)], val);
             }
           }
         }
@@ -1778,41 +1762,24 @@ next_duped_instr:;
           // phi entries
           for (auto &instr : merge_data.bb->instrs()) {
             if (auto phi = dynamic_cast<Phi*>(const_cast<Instr*>(&instr))) {
+              phi->clearValues();
               auto &entries = unroll_data[merge].phi_ref[phi];
-
-              // update values of current phi entries
-              for (auto &[pred, data] : entries) {
-                auto &[val, removed] = data;
-                if (!removed) {
-                  if (dynamic_cast<Constant*>(val))
-                    continue;
-                  phi->rauw(*val, *get_updated_val(val, pred, phi));
-                }
-              }
 
               // add entries with updated values
               for (auto &pred : merge_data.preds) {
-                auto orig_pred = unroll_data[get<1>(pred)].first_original;
-                auto I = entries.find(orig_pred);
-                if (I != entries.end()) {
-                  if (get<2>(pred) || (get<1>(pred) == orig_pred &&
-                                       !I->second.second))
-                    continue;
-                }
-
-                // for created phis grab val from phi_use
-                auto val = entries.empty() ? phi_use[phi] : I->second.first;
-
-                // if value for orig_pred entry is constant, add new entry for
-                // new bb with that constant
-                if (dynamic_cast<Constant*>(val)) {
-                  auto name = lt.node_data[get<1>(pred)].bb->getName();
-                  phi->addValue(*val, move(name));
+                // ignore backedges
+                if (get<2>(pred))
                   continue;
-                }
-                auto name = lt.node_data[get<1>(pred)].bb->getName();
-                phi->addValue(*get_updated_val(val, get<1>(pred), phi),
-                              move(name));
+
+                auto orig_pred = unroll_data[get<1>(pred)].first_original;
+                auto val = entries.empty() ? phi_use[phi]
+                                           : entries.find(orig_pred)->second;
+                auto pred_name = lt.node_data[get<1>(pred)].bb->getName();
+                if (dynamic_cast<Constant*>(val))
+                  phi->addValue(*val, move(pred_name));
+                else
+                  phi->addValue(*get_updated_val(val, get<1>(pred), phi),
+                                move(pred_name));
               }
             } else {
               break;
@@ -1820,6 +1787,7 @@ next_duped_instr:;
           }
         }
 
+        users = fn->getUsers();
         // update non-phi instruction operands in reverse topological order
         for (auto I = bbs_top_order.rbegin(), E = bbs_top_order.rend(); I != E;
              ++I) {

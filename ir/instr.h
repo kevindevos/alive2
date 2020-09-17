@@ -296,6 +296,7 @@ public:
 
   void addValue(Value &val, std::string &&BB_name);
   void removeValue(const std::string &BB_name);
+  void clearValues() { values.clear(); }
   void replaceLabels(const std::string &what, const std::string &with);
 
   std::vector<std::pair<Value*, std::string>> getValues();
