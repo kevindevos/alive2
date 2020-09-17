@@ -1469,6 +1469,8 @@ void Transform::preprocess(unsigned unroll_factor) {
 
       transitive_closure.clear();
       visited.clear();
+      visited.resize(lt.loop_data.size());
+      top_order_idx.clear();
 
       // LOOP UNROLL
       stack<unsigned> S;
