@@ -1133,6 +1133,8 @@ void Transform::preprocess(unsigned unroll_factor) {
     string suffix;
     // phis and entries to keep track of for operand updates phi -> <val, bb>
     unordered_map<Value*, unordered_map<unsigned, Value*>> phi_ref;
+    // keep track of added phis in original bbs
+    vector<pair<Value*, Value*>> added_phi;
   };
 
   if (k > 0) {
@@ -1444,8 +1446,10 @@ void Transform::preprocess(unsigned unroll_factor) {
                                                 "_phi_" + bb_name);
                     auto &phi_ = to_add.emplace_back(merge, move(phi)).second;
                     unroll_data[merge].dupes.emplace_front(val, &(*phi_));
-                    instr_dupes[val].emplace_back(merge, &(*phi_));
+                    // do not update instr_dupes here for phi, it is to update
+                    // topologically after topsort
                     phi_use[&(*phi_)] = val;
+                    unroll_data[merge].added_phi.emplace_back(val,  &(*phi_));
                   }
                 }
               }
@@ -1625,20 +1629,32 @@ void Transform::preprocess(unsigned unroll_factor) {
         for (auto id : bbs_top_order) {
           auto bb = lt.node_data[id].bb;
           auto orig_bb = lt.node_data[unroll_data[id].first_original].bb;
+
           if (unroll_data[id].first_original != id) {
             auto back_instr = bb->delInstr(&bb->back());
             auto &suffix = unroll_data[id].suffix;
             for (auto &i : orig_bb->instrs()) {
               if (&i != &orig_bb->back()) {
                 bb->addInstr(i.dup(suffix));
-                auto i_val = (Value*) &i;
+                Value *i_val = (Value*) &i;
+                // if inserted phi grab the correct value to register dupe for
+                if (auto phi = dynamic_cast<Phi*>(i_val)) {
+                  auto I = phi_use.find(phi);
+                  if (I != phi_use.end())
+                    i_val = I->second;
+                }
                 instr_dupes[i_val].emplace_back(id, &bb->back());
                 unroll_data[id].dupes.emplace_back(i_val, &bb->back());
               }
             }
-
             // append previously extracted instr
             bb->addInstr(move(back_instr));
+          } else {
+            // check for added phis in original and add them topologically
+            for (auto &[val, newval] : unroll_data[id].added_phi) {
+              instr_dupes[val].emplace_back(id, newval);
+              unroll_data[id].dupes.emplace_back(val, newval);
+            }
           }
 
           // set phi_use for duped phis from inserted phis so when adding
