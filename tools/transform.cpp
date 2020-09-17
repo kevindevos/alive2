@@ -1420,19 +1420,12 @@ void Transform::preprocess(unsigned unroll_factor) {
 
       // for each var declared in loop, if use outside loop add phi to
       // appropriate merge exits
-      vector<bool> visited;
-      visited.resize(lt.node_data.size());
       auto users = fn->getUsers();
-
       vector<pair<unsigned, unique_ptr<Phi>>> to_add;
       for (auto loop_hdr : lt.loop_header_ids) {
         auto &merge_exits = loop_merge_exits[loop_hdr];
 
         for (auto id : lt.loop_data[loop_hdr].nodes) {
-          if (visited[id])
-            continue;
-          visited[id] = true;
-
           auto bb = lt.node_data[id].bb;
           for (auto &instr : bb->instrs()) {
             if (&instr == &bb->back())
@@ -1466,11 +1459,11 @@ void Transform::preprocess(unsigned unroll_factor) {
         lt.node_data[bb_id].bb->addInstrFront(move(phi));
 
       transitive_closure.clear();
-      visited.clear();
-      visited.resize(lt.loop_data.size());
       top_order_idx.clear();
 
       // LOOP UNROLL
+      vector<bool> visited;
+      visited.resize(lt.loop_data.size());
       stack<unsigned> S;
       S.push(0);
 
@@ -1702,16 +1695,14 @@ void Transform::preprocess(unsigned unroll_factor) {
           return updated_val;
         };
 
+        // add entries to phis with updated values
         for (auto merge : bbs_top_order) {
           auto &merge_data = lt.node_data[merge];
-
-          // phi entries
           for (auto &instr : merge_data.bb->instrs()) {
             if (auto phi = dynamic_cast<Phi*>(const_cast<Instr*>(&instr))) {
               phi->clearValues();
               auto &entries = unroll_data[merge].phi_ref[phi];
 
-              // add entries with updated values
               for (auto &pred : merge_data.preds) {
                 // ignore backedges
                 if (get<2>(pred))
