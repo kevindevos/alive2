@@ -1651,6 +1651,18 @@ void Transform::preprocess(unsigned unroll_factor) {
             bb->addInstr(move(back_instr));
           }
 
+          // set phi_use for duped phis from inserted phis so when adding
+          // entries the algorithm knows which value to use for these too
+          auto it = bb->instrs().begin();
+          for (auto &i : orig_bb->instrs()) {
+            if (auto phi = dynamic_cast<Phi*>(const_cast<Instr*>(&i))) {
+              auto I = phi_use.find(phi);
+              if (I != phi_use.end())
+                phi_use[(Value*) &(*it)] = I->second;
+            }
+            ++it;
+          }
+
           auto &phi_ref = unroll_data[id].phi_ref;
           unordered_map<unsigned, bool> preds;
           for (auto &p : lt.node_data[id].preds)
