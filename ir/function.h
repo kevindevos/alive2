@@ -247,15 +247,14 @@ private:
   std::vector<Vecset*> vecsets;
   std::vector<Vecset> vecsets_data;
 
-  // id's of bb's that are loop headers
-  std::vector<unsigned> loop_header_ids;
-
-
   unsigned vecsetFind(unsigned bb);
   void vecsetUnion(unsigned from, unsigned to);
   void buildLoopTree();
 public:
   std::vector<unsigned> last; // preorder -> preorder
+
+  // id's of bb's that are loop headers
+  std::vector<unsigned> loop_header_ids;
 
   // bb -> bb id
   std::unordered_map<const BasicBlock*, unsigned> bb_map;

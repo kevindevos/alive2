@@ -1187,6 +1187,14 @@ void Transform::preprocess(unsigned unroll_factor) {
 
       // all dupes and the bb_id they were created for a given instr
       unordered_map<Value*, list<pair<unsigned, Value*>>> instr_dupes;
+      // loop merge exits in which possibly phi instructions are inserted
+      unordered_map<unsigned, unordered_set<unsigned>> loop_merge_exits;
+      // topological order idx given bb id
+      vector<unsigned> top_order_idx;
+      // check if bb1 is ancestor of bb2 through transitive closure of bb1
+      unordered_map<unsigned, unordered_set<unsigned>> transitive_closure;
+      // values to dinstiguish for inserted phis
+      unordered_map<Value*, Value*> phi_use;
 
       // Prepare data structure for unroll algorithm
       for (auto node : lt.node_data) {
@@ -1368,10 +1376,103 @@ void Transform::preprocess(unsigned unroll_factor) {
           dupe_bb(loop.nodes[i], cur_loop);
       };
 
+      auto is_ancestor = [&](unsigned bb1, unsigned bb2) -> bool {
+        if (top_order_idx[bb1] > top_order_idx[bb2])
+          return false;
+        if (bb1 == bb2)
+          return true;
+        auto &tc = transitive_closure[bb1];
+        if (!tc.empty())
+          return tc.count(bb2);
+
+        bool found = false;
+        vector<unsigned> wl = { bb1 };
+        do {
+          auto bb = wl.back();
+          wl.pop_back();
+          for (auto &[dst, val, back_edge, def] : lt.node_data[bb].succs) {
+            (void)def;
+            if (!back_edge && tc.insert(dst).second) {
+              wl.push_back(dst);
+              if (dst == bb2)
+                found = true;
+            }
+          }
+        } while (!wl.empty());
+
+        return found;
+      };
+
+      // Insert phi instructions before unroll
+      // initialize topological order of bb given id
+      top_order_idx.resize(lt.node_data.size());
+      auto &bbs = fn->getBBs();
+      unsigned bbnum = bbs.size();
+      for (unsigned i = 0; i < bbnum; ++i)
+        top_order_idx[lt.bb_map[bbs[i]]] = i;
+
+      // identify merge exits for each loop
+      for (auto loop_hdr : lt.loop_header_ids) {
+        auto &merge_exits = loop_merge_exits[loop_hdr];
+        for (auto id : lt.loop_data[loop_hdr].nodes)
+          for (auto &succ : lt.node_data[id].succs)
+            if (!in_loop(get<0>(succ), loop_hdr))
+              merge_exits.insert(get<0>(succ));
+      }
+
+      // for each var declared in loop, if use outside loop add phi to
+      // appropriate merge exits
       vector<bool> visited;
+      visited.resize(lt.node_data.size());
+      auto users = fn->getUsers();
+
+      vector<pair<unsigned, unique_ptr<Phi>>> to_add;
+      for (auto loop_hdr : lt.loop_header_ids) {
+        auto &merge_exits = loop_merge_exits[loop_hdr];
+
+        for (auto id : lt.loop_data[loop_hdr].nodes) {
+          if (visited[id])
+            continue;
+          visited[id] = true;
+
+          auto bb = lt.node_data[id].bb;
+          for (auto &instr : bb->instrs()) {
+            if (&instr == &bb->back())
+              continue;
+            Value *val = (Value*) const_cast<Instr*>(&instr);
+            auto uses = users.equal_range(val);
+            for (auto I = uses.first, E = uses.second; I != E; ++I) {
+              auto cbbid = lt.bb_map[*((Instr*) I->second)->containingBB()];
+
+              // if use not in loop add phi
+              if (!in_loop(cbbid, loop_hdr)) {
+                for (auto merge : merge_exits) {
+                  if (is_ancestor(merge, cbbid)) {
+                    auto &bb_name = lt.node_data[merge].bb->getName();
+                    auto phi = make_unique<Phi>(val->getType(), val->getName() +
+                                                "_phi_" + bb_name);
+                    auto &phi_ = to_add.emplace_back(merge, move(phi)).second;
+                    unroll_data[merge].dupes.emplace_front(val, &(*phi_));
+                    instr_dupes[val].emplace_back(merge, &(*phi_));
+                    phi_use[&(*phi_)] = val;
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+
+      // add phis to bbs
+      for (auto &[bb_id, phi] : to_add)
+        lt.node_data[bb_id].bb->addInstrFront(move(phi));
+
+      transitive_closure.clear();
+      visited.clear();
+
+      // LOOP UNROLL
       stack<unsigned> S;
       S.push(0);
-      visited.resize(lt.loop_data.size());
 
       while (!S.empty()) {
         auto n = S.top();
@@ -1516,8 +1617,8 @@ void Transform::preprocess(unsigned unroll_factor) {
 
         // update BB_order in function for the desired topological order
         vector<unsigned> bbs_top_order;
-        vector<unsigned> top_order_idx;
         vector<pair<Phi*, string>> todo_original;
+        vector<unsigned> top_order_idx;
         top_order_idx.resize(lt.node_data.size());
         auto &bbs = fn->getBBs();
         bbs.clear();
@@ -1639,43 +1740,9 @@ void Transform::preprocess(unsigned unroll_factor) {
           return updated_val;
         };
 
-        // check if a dupe of val does not exist in some path between merge
-        // and use_bb
-        auto no_dupe_between = [&](unsigned use_bb, unsigned merge,
-                                   Value *val) -> bool {
-          unordered_map<unsigned, Value*> dupes;
-          for (auto &[dupe_bb, duped_val] : instr_dupes[val]) {
-            auto dupe_bb_ = lt.node_data[dupe_bb].bb;
-            if (dupe_bb == use_bb && !use_before_decl(val, duped_val, dupe_bb_))
-              return false;
-            dupes.emplace(dupe_bb, duped_val);
-          }
-          if (use_bb == merge)
-            return true;
-          vector<unsigned> wl;
-          wl.emplace_back(use_bb);
-          while (!wl.empty()) {
-            auto bb = wl.back();
-            wl.pop_back();
-            // early exit if we reach a node through which merge is no direct
-            // or indirect predecessor (forward edges only)
-            if (top_order_idx[bb] < top_order_idx[merge] || dupes.count(bb))
-              continue;
-            for (auto &pred : lt.node_data[bb].preds) {
-              if (get<2>(pred))
-                continue;
-              if (get<1>(pred) == merge)
-                return true;
-              else
-                wl.emplace_back(get<1>(pred));
-            }
-          }
-          return false;
-        };
-
         unordered_map<Value*, Value*> phi_use;
-        auto users = fn->getUsers();
-
+        users = fn->getUsers();
+        top_order_idx.resize(lt.node_data.size());
         for (auto merge : bbs_top_order) {
           auto &merge_data = lt.node_data[merge];
 
