@@ -1594,27 +1594,37 @@ void Transform::preprocess(unsigned unroll_factor) {
               for (auto I = uses.first, E = uses.second; I != E; ++I) {
                 auto cbbid = lt.bb_map[*((Instr*) I->second)->containingBB()];
 
+                if (in_loop(cbbid, loop_hdr))
+                  continue;
+
                 // if found use not in loop add phi and stop
-                if (!in_loop(cbbid, loop_hdr)) {
-                  bool added_phi = false;
-                  for (auto merge : merge_exits) {
-                    if (is_ancestor(merge, cbbid)) {
-                      auto &bb_name = lt.node_data[merge].bb->getName();
-                      auto phi = make_unique<Phi>(val->getType(), val->getName() +
-                                                  "_phi_" + bb_name);
-                      auto &phi_ = to_add.emplace_back(merge, move(phi)).second;
-                      unroll_data[merge].dupes.emplace_front(val, &(*phi_));
-                      // do not update instr_dupes here for phi, it is to update
-                      // topologically after topsort
-                      phi_use[&(*phi_)] = val;
-                      unroll_data[merge].added_phi.emplace_back(val,  &(*phi_));
-                      added_phi = true;
-                    }
+                bool added_phi = false;
+                for (auto merge : merge_exits) {
+                  if (is_ancestor(merge, cbbid)) {
+                    auto o_cbbid = lt.bb_map[*((Instr*) val)->containingBB()];
+                    // is val declared before each pred?
+                    for (auto pred : lt.node_data[merge].preds)
+                      if (get<1>(pred) != o_cbbid &&
+                          !is_ancestor(o_cbbid, get<1>(pred)))
+                        goto next_duped_instr;
+
+                    auto &bb_name = lt.node_data[merge].bb->getName();
+                    auto phi = make_unique<Phi>(val->getType(), val->getName() +
+                                                "_phi_" + bb_name);
+                    auto &phi_ = to_add.emplace_back(merge, move(phi)).second;
+                    unroll_data[merge].dupes.emplace_front(val, &(*phi_));
+                    // do not update instr_dupes here for phi, it is to update
+                    // topologically after topsort
+                    phi_use[&(*phi_)] = val;
+                    unroll_data[merge].added_phi.emplace_back(val,  &(*phi_));
+                    added_phi = true;
                   }
-                  if (added_phi)
-                    break;
+
                 }
+                if (added_phi)
+                  break;
               }
+next_duped_instr:;
             }
           }
         }
