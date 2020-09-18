@@ -1549,33 +1549,28 @@ void Transform::preprocess(unsigned unroll_factor) {
           bbs_top_order.emplace_back(id);
         }
 
-        // check if bb1 is ancestor of bb2 through transitive closure of bb1
-        unordered_map<unsigned, unordered_set<unsigned>> transitive_closure;
+        // check if bb1 is ancestor of bb2
         auto is_ancestor = [&](unsigned bb1, unsigned bb2) -> bool {
           if (top_order_idx[bb1] > top_order_idx[bb2])
             return false;
           if (bb1 == bb2)
             return true;
-          auto &tc = transitive_closure[bb1];
-          if (!tc.empty())
-            return tc.count(bb2);
 
-          bool found = false;
           vector<unsigned> wl = { bb1 };
           do {
             auto bb = wl.back();
             wl.pop_back();
-            for (auto &[dst, val, back_edge, def] : lt.node_data[bb].succs) {
-              (void)def;
-              if (!back_edge && tc.insert(dst).second) {
-                wl.push_back(dst);
-                if (dst == bb2)
-                  found = true;
-              }
+            for (auto &s : lt.node_data[bb].succs) {
+              auto &dst = get<0>(s);
+              if (dst == bb2)
+                return true;
+              if (get<2>(s) || top_order_idx[dst] > top_order_idx[bb2])
+                continue;
+              wl.push_back(dst);
             }
           } while (!wl.empty());
 
-          return found;
+          return false;
         };
 
         auto use_before_decl = [&](Value *use, Value *decl, BasicBlock *bb)
