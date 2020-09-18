@@ -1128,7 +1128,6 @@ void Transform::preprocess(unsigned unroll_factor) {
     bool pre_duped = false;
     // instructions that were duplicated given original and new in this bb
     list<pair<Value*, Value*>> dupes;
-    unsigned num_preds_changed_to_sink;
     // suffix for bb name
     string suffix;
     // phis and entries to keep track of for operand updates phi -> <val, bb>
@@ -1320,12 +1319,8 @@ void Transform::preprocess(unsigned unroll_factor) {
           }
         }
 
-        auto &num_preds_sink = unroll_data[dst].num_preds_changed_to_sink;
-        if (to_sink) {
-          ++num_preds_sink;
-          if (!sink)
-            sink = &fn->getBB("#sink");
-        }
+        if (to_sink && !sink)
+          sink = &fn->getBB("#sink");
 
         if (!replace) {
           auto dst_ = to_sink ? *sink : dst_data.bb;
