@@ -1187,7 +1187,7 @@ void Transform::preprocess(unsigned unroll_factor) {
       unordered_map<Value*, list<pair<unsigned, Value*>>> instr_dupes;
 
       // Prepare data structure for unroll algorithm
-      for (auto node : lt.node_data) {
+      for (auto &node : lt.node_data) {
         unroll_data.emplace_back();
         auto &u_data = unroll_data.back();
         u_data.id = node.id;
