@@ -1379,7 +1379,7 @@ void Transform::preprocess(unsigned unroll_factor) {
         }
       }
 
-      // get users before loop unroll
+      // get users before loop unroll for the phi insertion algorithm
       auto users = fn->getUsers();
 
       // Loop unroll
@@ -1398,13 +1398,9 @@ void Transform::preprocess(unsigned unroll_factor) {
           for (auto child_loop : lt.loop_data[n].child_loops)
             S.push(child_loop);
         } else {
-          cur_loop = n;
-
-          // ignore loops not marked reducible or irreducible
-          auto n_type = lt.node_data[n].type;
-          if (n_type != LoopTree::LHeaderType::reducible &&
-              n_type != LoopTree::LHeaderType::irreducible)
+          if (lt.node_data[n].type == LoopTree::LHeaderType::nonheader)
             continue;
+          cur_loop = n;
 
           // pre-dupe all headers of loops that contain this one if not done yet
           // in outer -> inner order
