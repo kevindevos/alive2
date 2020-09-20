@@ -207,16 +207,17 @@ public:
   public:
     unsigned id;
     BasicBlock *bb;
-    std::vector<std::tuple<Value*, unsigned, bool>> preds;
     // id, cond, is_back_edge, default
     std::vector<std::tuple<unsigned, Value*, bool, bool>> succs;
+    std::vector<std::tuple<Value*, unsigned, bool>> preds;
+    std::optional<unsigned> first_header;
+    unsigned header;
+    LHeaderType type;
+    // properties used only for loop identification
     std::vector<unsigned> non_back_preds;
     std::vector<unsigned> back_preds;
     std::vector<unsigned> red_back_in;
     std::vector<unsigned> other_in;
-    unsigned header;
-    std::optional<unsigned> first_header;
-    LHeaderType type;
   };
 
   struct LoopData {

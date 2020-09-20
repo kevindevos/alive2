@@ -1123,9 +1123,6 @@ void Transform::preprocess(unsigned unroll_factor) {
     // the bb in original CFG from which this has been duped
     unsigned dupe_counter;
     std::optional<unsigned> last_dupe;
-    // id of loop in which this bb was last duped in
-    optional<unsigned> prev_loop_dupe;
-    bool pre_duped = false;
     // instructions that were duplicated given original and new in this bb
     list<pair<Value*, Value*>> dupes;
     // suffix for bb name
@@ -1184,8 +1181,8 @@ void Transform::preprocess(unsigned unroll_factor) {
 
       vector<UnrollNodeData> unroll_data;
       unsigned cur_loop; // current loop being unrolled
-      optional<unsigned> prev_loop; // loop unrolled before current
       unsigned num_duped_bbs = 0;
+      vector<unsigned> duped_bbs;
       optional<BasicBlock*> sink;
 
       // all dupes and the bb_id they were created for a given instr
@@ -1255,18 +1252,10 @@ void Transform::preprocess(unsigned unroll_factor) {
         auto &u_ins_data = unroll_data[id];
 
         // if bb was last duped in a different loop, make it the new original
+        u_ins_data.first_original = u_bb_data.first_original;
         u_ins_data.original = u_bb_data.original;
-        if (u_bb_data.prev_loop_dupe.has_value() &&
-            u_bb_data.prev_loop_dupe != cur_loop) {
-          u_ins_data.original = bb;
-          u_bb_data.original = bb;
-        }
-
-        u_bb_data.prev_loop_dupe = cur_loop;
-        u_ins_data.prev_loop_dupe = cur_loop;
         unroll_data[u_ins_data.original].last_dupe = id;
         u_ins_data.id = id;
-        u_ins_data.first_original = u_bb_data.first_original;
 
         // add duped bbs straight into the containing loop's body if it exists
         auto &fh = lt.node_data[loop].first_header;
@@ -1283,8 +1272,9 @@ void Transform::preprocess(unsigned unroll_factor) {
       };
 
       auto in_loop = [&](unsigned bb, unsigned loop) -> bool {
-        if (bb == loop) return true;
-        auto bb_header = *lt.node_data[bb].first_header;
+        auto bb_ = unroll_data[bb].original;
+        if (bb_ == loop) return true;
+        auto bb_header = *lt.node_data[bb_].first_header;
 
         while (bb_header) {
           if (bb_header != loop)
@@ -1297,7 +1287,7 @@ void Transform::preprocess(unsigned unroll_factor) {
       };
 
       auto add_edge = [&](Value *cond, unsigned src, unsigned dst, bool replace,
-                          bool to_sink, bool is_default)
+                          bool is_default, bool as_back)
                           -> optional<pair<unsigned,unsigned>> {
         // dst <- src
         optional<pair<unsigned, unsigned>> pred_to_erase;
@@ -1307,32 +1297,32 @@ void Transform::preprocess(unsigned unroll_factor) {
 
         if (replace) {
           instr->replaceTarget(cond, *dst_data.bb);
-          lt.node_data[dst].preds.emplace_back(cond, src, false);
-          for (auto &[succ, val, back_edge, def] : lt.node_data[src].succs) {
+          dst_data.preds.emplace_back(cond, src, false);
+          for (auto &[succ, val, back_edge, def] : src_data.succs) {
             (void)def;
             if (val == cond) {
               pred_to_erase = make_pair(succ, src);
               succ = dst;
-              back_edge = to_sink;
+              back_edge = as_back;
               break;
             }
           }
         }
 
-        if (to_sink && !sink)
-          sink = &fn->getBB("#sink");
-
         if (!replace) {
-          auto dst_ = to_sink ? *sink : dst_data.bb;
+          if (as_back && !sink)
+            sink = &fn->getBB("#sink");
+          auto dst_ = as_back ? *sink : dst_data.bb;
+
           if (is_default) {
             if (auto sw = dynamic_cast<Switch*>(&src_data.bb->back()))
               sw->setDefaultTarget(*dst_);
           } else {
             instr->addTarget(cond, *dst_);
           }
-          if (!to_sink)
-            dst_data.preds.emplace_back(cond, src, false);
-          lt.node_data[src].succs.emplace_back(dst, cond, to_sink, is_default);
+          dst_data.preds.emplace_back(cond, src, as_back);
+          src_data.succs.emplace_back(dst, cond, as_back, is_default);
+
         }
         return pred_to_erase;
       };
@@ -1345,17 +1335,9 @@ void Transform::preprocess(unsigned unroll_factor) {
         return false;
       };
 
-      auto add_edges_to_sink = [&](unsigned bb, unsigned ref_bb,
-                                   unsigned loop_header) {
-        for (auto &[dst, val, back_edge, def] : lt.node_data[ref_bb].succs) {
-          (void)back_edge;
-          if (in_loop(dst, loop_header))
-            add_edge(val, bb, last_dupe(dst), false, true, def);
-        }
-      };
-
       auto duplicate_header = [&](unsigned loop)  -> unsigned {
         unsigned duped_header = dupe_bb(loop, loop);
+        duped_bbs.emplace_back(duped_header);
         ((JumpInstr*) &lt.node_data[duped_header].bb->back())->clearTargets();
         return duped_header;
       };
@@ -1366,7 +1348,18 @@ void Transform::preprocess(unsigned unroll_factor) {
         auto &loop = lt.loop_data[cur_loop];
         loop_size = loop.nodes.size();
         for (unsigned i = 1; i < loop_size; ++i)
-          dupe_bb(loop.nodes[i], cur_loop);
+          duped_bbs.emplace_back(dupe_bb(loop.nodes[i], cur_loop));
+      };
+
+      // helper function for erasing preds when replacing edges
+      auto erase_pred = [&](unsigned bb, unsigned pred) {
+        auto &preds = lt.node_data[bb].preds;
+        for (auto I = preds.begin(), E = preds.end(); I != E; ++I) {
+          if (get<1>(*I) == pred) {
+            preds.erase(I);
+            break;
+          }
+        }
       };
 
       // identify merge exits for each loop
@@ -1389,109 +1382,81 @@ void Transform::preprocess(unsigned unroll_factor) {
       visited.resize(lt.loop_data.size());
 
       while (!S.empty()) {
-        auto n = S.top();
+        auto h = S.top();
         S.pop();
 
-        if (!visited[n]) {
-          visited[n] = true;
-          S.push(n);
-          for (auto child_loop : lt.loop_data[n].child_loops)
+        if (!visited[h]) {
+          visited[h] = true;
+          S.push(h);
+          for (auto child_loop : lt.loop_data[h].child_loops)
             S.push(child_loop);
         } else {
-          if (lt.node_data[n].type == LoopTree::LHeaderType::nonheader)
+          if (lt.node_data[h].type == LoopTree::LHeaderType::nonheader)
             continue;
-          cur_loop = n;
+          cur_loop = h;
 
-          // pre-dupe all headers of loops that contain this one if not done yet
-          // in outer -> inner order
-          stack<unsigned> loops;
-          auto loop = n;
-          while (loop != lt.ROOT_ID && !unroll_data[loop].pre_duped) {
-            loops.push(loop);
-            loop = *lt.node_data[loop].first_header;
-          }
+          unsigned hprev = h;
+          for (unsigned i = 0; i < k; ++i) {
+            ///// Body
+            if (i > 0) {
+              duplicate_body();
 
-          while (!loops.empty()) {
-            loop = loops.top();
-            loops.pop();
-            unroll_data[loop].pre_duped = true;
+              // body successors to in and out of loop
+              for (auto bb : lt.loop_data[h].nodes) {
+                if (bb == h)
+                  continue;
+                for (auto &[dst, val, be, def] : lt.node_data[bb].succs) {
+                  auto dst_original = unroll_data[dst].original;
+                  bool dst_in_loop = in_loop(dst_original, cur_loop);
+                  auto dst_ = dst_in_loop ? last_dupe(dst) : dst;
+                  auto is_back = be || dst_ == hprev;
+                  add_edge(val, last_dupe(bb), dst_, false, def, is_back);
+                }
+              }
 
-            bool is_last_it = k == 1;
-            if (is_last_it && !has_exits(loop, loop))
-              break;
-            optional<unsigned> n_ = duplicate_header(loop);
-
-            vector<pair<unsigned, unsigned>> preds_to_remove;
-            for (auto &[c, pred, be] : lt.node_data[loop].preds) {
-              (void)be;
-              if (in_loop(pred, loop))
-                if (auto to_erase = add_edge(c, pred, *n_, true, false, false))
-                  preds_to_remove.emplace_back(*to_erase);
-            }
-
-            // remove preds from replaced edges outside pred iteration
-            for (auto [dst, pred] : preds_to_remove) {
-              auto &preds = lt.node_data[dst].preds;
-              for (auto I = preds.begin(), E = preds.end(); I != E; ++I) {
-                if (get<1>(*I) == pred) {
-                  preds.erase(I);
-                  break;
+              // header successors into loop
+              for (auto &[dst, val, be, def] : lt.node_data[hprev].succs) {
+                (void)be;
+                if (in_loop(dst, h)) {
+                  auto [d, p] = *add_edge(val, hprev, last_dupe(dst), true,
+                                          def, false);
+                  erase_pred(d, p); // erase here due to it. invalidation
                 }
               }
             }
 
-            for (auto &[dst, val, back_edge, def] : lt.node_data[loop].succs) {
-              (void)back_edge;
-              if (!in_loop(dst, loop))
-                add_edge(val, *n_, last_dupe(dst), false, false, def);
-            }
+            // Skip header if it will not have exits
+            if (i == k - 1 && !has_exits(h, cur_loop))
+              continue;
 
-            // back-edges as edges to #sink
-            if (is_last_it && n_)
-              add_edges_to_sink(*n_, loop, loop);
-          }
-
-          auto n_prev = last_dupe(n);
-          for (unsigned i = 1; i < k; ++i) {
-            // create BB copies of the loop body
-            duplicate_body();
-
-            optional<unsigned> n_;
-            bool is_last_it = i == k - 1;
-            if (!is_last_it || has_exits(n, cur_loop))
-               n_ = duplicate_header(n);
-
-            // dupe header edges
-            for (auto &[dst, val, back_edge, def] : lt.node_data[n].succs) {
-              (void)back_edge;
-              if (in_loop(dst, n))
-                add_edge(val, n_prev, last_dupe(dst), false, false, def);
-              else
-                if (n_)
-                  add_edge(val, *n_, dst, false, false, def);
-            }
-
-            // edges to #sink
-            if (is_last_it && n_)
-              add_edges_to_sink(*n_, n, cur_loop);
-
-             // dupe body edges
-            auto &loop = lt.loop_data[n].nodes;
-            auto loop_size = loop.size();
-            for (unsigned i = 1; i < loop_size; ++i) {
-              auto bb = loop[i];
-              for (auto &[dst, val, back_edge, def] : lt.node_data[bb].succs) {
-                auto dst_original = unroll_data[dst].original;
-                bool dst_in_loop = in_loop(dst_original, cur_loop);
-                auto dst_ = dst_in_loop ? last_dupe(dst) : dst;
-                auto src = last_dupe(bb);
-                add_edge(val, src, dst_, false, back_edge || dst_ == n_prev,
-                         def);
+            ///// Header
+            unsigned h_ = duplicate_header(h);
+            // replace header edges from predecessors in loop
+            for (auto &[c, pred, be] : lt.node_data[hprev].preds) {
+              (void)be;
+              if (in_loop(pred, h)) {
+                auto [d, p] = *add_edge(c, last_dupe(pred), h_, true, false,
+                                        false);
+                erase_pred(d, p); // erase here due to it. invalidation
               }
             }
-            n_prev = *n_;
+
+            // header edges
+            for (auto &[dst, val, be, def] : lt.node_data[hprev].succs) {
+              auto back_edge = be || in_loop(dst, cur_loop);
+              add_edge(val, h_, last_dupe(dst), false, def, back_edge);
+            }
+            hprev = h_;
           }
-          prev_loop = cur_loop;
+
+          // reset original and last_dupe to self after this loop unroll
+          for (auto bb : duped_bbs) {
+            unroll_data[bb].original = bb;
+            unroll_data[bb].last_dupe = bb;
+          }
+          for (auto bb : lt.loop_data[cur_loop].nodes)
+            unroll_data[bb].last_dupe = bb;
+          duped_bbs.clear();
         }
       }
 
