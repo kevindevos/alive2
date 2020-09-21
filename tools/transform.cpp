@@ -1236,13 +1236,13 @@ void Transform::preprocess(unsigned unroll_factor) {
         // dupe only back instr
         ins_bb->addInstr(bb_first_orig->back().dup(suffix));
         unroll_data[id].suffix = move(suffix);
+        ((JumpInstr*) &ins_bb->back())->clearTargets();
 
         lt.node_data.emplace_back();
         if (id >= lt.loop_data.size())
           lt.loop_data.emplace_back();
         lt.loop_data[id].id = id;
 
-        ((JumpInstr*) &ins_bb->back())->clearTargets();
         auto &ins_n_data = lt.node_data[id];
         ins_n_data.bb = ins_bb;
         ins_n_data.id = id;
@@ -1250,8 +1250,6 @@ void Transform::preprocess(unsigned unroll_factor) {
         ins_n_data.first_header = *bb_data.first_header;
 
         auto &u_ins_data = unroll_data[id];
-
-        // if bb was last duped in a different loop, make it the new original
         u_ins_data.first_original = u_bb_data.first_original;
         u_ins_data.original = u_bb_data.original;
         unroll_data[u_ins_data.original].last_dupe = id;
