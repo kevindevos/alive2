@@ -436,7 +436,7 @@ void LoopTree::buildLoopTree() {
       t_data.id = t_n;
       // set back-edge flag to false for now, update later with DFS and
       // isAncestor
-      t_data.preds.emplace_back(c, pred, false);
+      t_data.preds.emplace_back(c, pred, false, is_default);
       node_data[pred].succs.emplace_back(t_n, c, false, is_default);
     };
 

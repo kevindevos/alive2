@@ -2199,9 +2199,6 @@ void JumpInstr::replaceTarget(Value *cond, BasicBlock &new_dst) {
                br->getFalse() != nullptr)
       br->setFalse(new_dst);
   } else if (auto sw = dynamic_cast<Switch*>(this)) {
-    // replace for both default and targets if duplicate exists
-    if (sw->getDefaultValue() == cond && sw->getDefault() != nullptr)
-      sw->setDefaultTarget(new_dst);
     int n_targets = sw->getNumTargets();
     for (int i = 0; i < n_targets; ++i) {
       auto &[val, dst] = sw->getTarget(i);

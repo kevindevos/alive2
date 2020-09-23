@@ -1296,8 +1296,14 @@ void Transform::preprocess(unsigned unroll_factor) {
         auto instr = (JumpInstr*) &src_data.bb->back();
 
         if (replace) {
-          instr->replaceTarget(cond, *dst_data.bb);
-          dst_data.preds.emplace_back(cond, src, false);
+          if (is_default) {
+            if (auto sw = dynamic_cast<Switch*>(&src_data.bb->back()))
+              sw->setDefaultTarget(*dst_data.bb);
+          } else {
+            instr->replaceTarget(cond, *dst_data.bb);
+          }
+
+          dst_data.preds.emplace_back(cond, src, false, is_default);
           for (auto &[succ, val, back_edge, def] : src_data.succs) {
             (void)def;
             if (val == cond) {
@@ -1320,9 +1326,8 @@ void Transform::preprocess(unsigned unroll_factor) {
           } else {
             instr->addTarget(cond, *dst_);
           }
-          dst_data.preds.emplace_back(cond, src, as_back);
+          dst_data.preds.emplace_back(cond, src, as_back, is_default);
           src_data.succs.emplace_back(dst, cond, as_back, is_default);
-
         }
         return pred_to_erase;
       };
@@ -1432,10 +1437,10 @@ void Transform::preprocess(unsigned unroll_factor) {
             ///// Header
             unsigned h_ = duplicate_header(h);
             // replace header edges from predecessors in loop
-            for (auto &[c, pred, be] : lt.node_data[hprev].preds) {
+            for (auto &[c, pred, be, def] : lt.node_data[hprev].preds) {
               (void)be;
               if (in_loop(pred, h)) {
-                auto [d, p] = *add_edge(c, last_dupe(pred), h_, true, false,
+                auto [d, p] = *add_edge(c, last_dupe(pred), h_, true, def,
                                         false);
                 erase_pred(d, p); // erase here due to it. invalidation
               }
