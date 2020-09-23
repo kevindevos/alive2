@@ -207,10 +207,9 @@ public:
   public:
     unsigned id;
     BasicBlock *bb;
-    // id, cond, is_back_edge, default
+    // id, cond, is_back_edge, is_default
     std::vector<std::tuple<unsigned, Value*, bool, bool>> succs;
-    // cond, id, is_back_edge, default
-    std::vector<std::tuple<Value*, unsigned, bool, bool>> preds;
+    std::vector<std::tuple<unsigned, Value*, bool, bool>> preds;
     std::optional<unsigned> first_header;
     unsigned header;
     LHeaderType type;

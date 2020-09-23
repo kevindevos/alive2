@@ -1303,7 +1303,7 @@ void Transform::preprocess(unsigned unroll_factor) {
             instr->replaceTarget(cond, *dst_data.bb);
           }
 
-          dst_data.preds.emplace_back(cond, src, false, is_default);
+          dst_data.preds.emplace_back(src, cond, false, is_default);
           for (auto &[succ, val, back_edge, def] : src_data.succs) {
             (void)def;
             if (val == cond) {
@@ -1326,7 +1326,7 @@ void Transform::preprocess(unsigned unroll_factor) {
           } else {
             instr->addTarget(cond, *dst_);
           }
-          dst_data.preds.emplace_back(cond, src, as_back, is_default);
+          dst_data.preds.emplace_back(src, cond, as_back, is_default);
           src_data.succs.emplace_back(dst, cond, as_back, is_default);
         }
         return pred_to_erase;
@@ -1360,7 +1360,7 @@ void Transform::preprocess(unsigned unroll_factor) {
       auto erase_pred = [&](unsigned bb, unsigned pred) {
         auto &preds = lt.node_data[bb].preds;
         for (auto I = preds.begin(), E = preds.end(); I != E; ++I) {
-          if (get<1>(*I) == pred) {
+          if (get<0>(*I) == pred) {
             preds.erase(I);
             break;
           }
@@ -1437,7 +1437,7 @@ void Transform::preprocess(unsigned unroll_factor) {
             ///// Header
             unsigned h_ = duplicate_header(h);
             // replace header edges from predecessors in loop
-            for (auto &[c, pred, be, def] : lt.node_data[hprev].preds) {
+            for (auto &[pred, c, be, def] : lt.node_data[hprev].preds) {
               (void)be;
               if (in_loop(pred, h)) {
                 auto [d, p] = *add_edge(c, last_dupe(pred), h_, true, def,
@@ -1577,8 +1577,8 @@ void Transform::preprocess(unsigned unroll_factor) {
                   // if variable not declared yet before or at some pred, skip
                   auto orig_cbbid = lt.bb_map[*((Instr*) val)->containingBB()];
                   for (auto pred : merge_data.preds)
-                    if (get<1>(pred) != orig_cbbid &&
-                        !is_ancestor(orig_cbbid, get<1>(pred)))
+                    if (get<0>(pred) != orig_cbbid &&
+                        !is_ancestor(orig_cbbid, get<0>(pred)))
                       goto next_duped_instr;
 
                   added_phi.insert(val);
@@ -1648,7 +1648,7 @@ next_duped_instr:;
           auto &phi_ref = unroll_data[id].phi_ref;
           unordered_map<unsigned, bool> preds;
           for (auto &p : lt.node_data[id].preds)
-            preds.emplace(unroll_data[get<1>(p)].first_original, get<2>(p));
+            preds.emplace(unroll_data[get<0>(p)].first_original, get<2>(p));
 
           for (auto &i : bb->instrs()) {
             if (auto phi = dynamic_cast<Phi*>(const_cast<Instr*>(&i))) {
@@ -1690,14 +1690,14 @@ next_duped_instr:;
                 if (get<2>(pred))
                   continue;
 
-                auto orig_pred = unroll_data[get<1>(pred)].first_original;
+                auto orig_pred = unroll_data[get<0>(pred)].first_original;
                 auto val = entries.empty() ? phi_use[phi]
                                            : entries.find(orig_pred)->second;
-                auto pred_name = lt.node_data[get<1>(pred)].bb->getName();
+                auto pred_name = lt.node_data[get<0>(pred)].bb->getName();
                 if (dynamic_cast<Constant*>(val))
                   phi->addValue(*val, move(pred_name));
                 else
-                  phi->addValue(*get_updated_val(val, get<1>(pred), phi),
+                  phi->addValue(*get_updated_val(val, get<0>(pred), phi),
                                 move(pred_name));
               }
             } else {
