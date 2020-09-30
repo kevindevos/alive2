@@ -1684,10 +1684,6 @@ next_duped_instr:;
 
               // add entries with updated values
               for (auto &pred : bbdata.preds) {
-                // ignore backedges
-                if (get<2>(pred))
-                  continue;
-
                 auto orig_pred = unroll_data[get<0>(pred)].first_original;
                 auto val = entries.empty() ? phi_use[phi]
                                            : entries.find(orig_pred)->second;
