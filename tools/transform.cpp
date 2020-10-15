@@ -1515,10 +1515,16 @@ void Transform::preprocess(unsigned unroll_factor) {
           if (bb1 == bb2)
             return true;
 
+          unordered_map<unsigned, bool> visited;
           vector<unsigned> wl = { bb1 };
           do {
             auto bb = wl.back();
             wl.pop_back();
+            auto &vis = visited[bb];
+            if (vis)
+              continue;
+            vis = true;
+
             for (auto &s : lt.node_data[bb].succs) {
               auto &dst = get<0>(s);
               if (dst == bb2)
