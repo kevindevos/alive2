@@ -1616,6 +1616,23 @@ next_duped_instr:;
           }
         }
 
+        // Get the most recently duped value given a value and the pred
+        auto get_updated_val = [&](Value *val, unsigned pred, Value *use)
+                               -> Value* {
+          Value *updated_val = val;
+          auto &idupes = instr_dupes[val];
+          for (auto I = idupes.rbegin(), E = idupes.rend(); I != E; ++I) {
+            auto &[decl_bb, duped_val] = *I;
+            auto bb = lt.node_data[pred].bb;
+            if (is_ancestor(decl_bb, pred) &&
+                (decl_bb != pred || !use_before_decl(use, duped_val, bb))) {
+              updated_val = duped_val;
+              break;
+            }
+          }
+          return updated_val;
+        };
+
         // dupe instrs in topological order and build phi reference
         for (auto id : bbs_top_order) {
           auto bb = lt.node_data[id].bb;
@@ -1674,22 +1691,6 @@ next_duped_instr:;
           }
         }
 
-        // Get the most recently duped value given a value and the pred
-        auto get_updated_val = [&](Value *val, unsigned pred, Value *use)
-                               -> Value* {
-          Value *updated_val = val;
-          auto &idupes = instr_dupes[val];
-          for (auto I = idupes.rbegin(), E = idupes.rend(); I != E; ++I) {
-            auto &[decl_bb, duped_val] = *I;
-            auto bb = lt.node_data[pred].bb;
-            if (is_ancestor(decl_bb, pred) &&
-                (decl_bb != pred || !use_before_decl(use, duped_val, bb))) {
-              updated_val = duped_val;
-              break;
-            }
-          }
-          return updated_val;
-        };
 
         // phi entries
         for (auto bb : bbs_top_order) {
