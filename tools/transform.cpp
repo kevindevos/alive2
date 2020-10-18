@@ -1551,6 +1551,20 @@ void Transform::preprocess(unsigned unroll_factor) {
 
         // add phi instructions where needed
         unordered_map<Value*, Value*> phi_use;
+        auto create_phi = [&](unsigned merge, Value *val)
+                          -> unique_ptr<Phi> {
+          auto &sfx = unroll_data[merge].suffix;
+          auto &bb_name = lt.node_data[merge].bb->getName();
+          auto phi = make_unique<Phi>(val->getType(),
+                                      val->getName() + sfx +
+                                      "_phi_" + bb_name);
+          unroll_data[merge].dupes.emplace_front(val, &(*phi));
+          phi_use[&(*phi)] = val;
+          unroll_data[merge].added_phi.emplace_back(val, &(*phi));
+          return phi;
+        };
+
+        // add phi instructions where needed - phi instr - original value
         for (auto loop_hdr : lt.loop_header_ids) {
           for (auto merge : unroll_data[loop_hdr].loop_merge_exits) {
             auto &merge_data = lt.node_data[merge];
@@ -1586,15 +1600,12 @@ void Transform::preprocess(unsigned unroll_factor) {
                       goto next_duped_instr;
 
                   added_phi.insert(val);
-                  auto &sfx = unroll_data[merge].suffix;
-                  auto &bb_name = lt.node_data[merge].bb->getName();
-                  auto phi = make_unique<Phi>(val->getType(),
-                                              I->first->getName() + sfx +
-                                              "_phi_" + bb_name);
-                  auto &phi_ = to_insert.emplace_back(move(phi));
-                  unroll_data[merge].dupes.emplace_front(val, &(*phi_));
-                  phi_use[&(*phi_)] = val;
-                  unroll_data[merge].added_phi.emplace_back(val, &(*phi_));
+                  to_insert.emplace_back(move(create_phi(merge, val)));
+
+                  // if for some merge or descendant thereof uses a value equal between
+                  // all preds, and the insertion of a phi in an ancestor block makes
+                  // one of these values different then a new phi needs to be inserted
+                  // gather_phi_candidates(merge, val);
                   break;
                 }
 next_duped_instr:;
