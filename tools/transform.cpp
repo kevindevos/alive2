@@ -1564,6 +1564,16 @@ void Transform::preprocess(unsigned unroll_factor) {
           return phi;
         };
 
+        // check if val is declared for each pred of merge
+        auto all_preds_know_val = [&](unsigned merge, Value *val) {
+          auto orig_cbbid = lt.bb_map[*((Instr*) val)->containingBB()];
+          for (auto pred : lt.node_data[merge].preds)
+            if (get<0>(pred) != orig_cbbid &&
+                !is_ancestor(orig_cbbid, get<0>(pred)))
+              return false;
+          return true;
+        };
+
         // add phi instructions where needed - phi instr - original value
         for (auto loop_hdr : lt.loop_header_ids) {
           for (auto merge : unroll_data[loop_hdr].loop_merge_exits) {
@@ -1591,13 +1601,8 @@ void Transform::preprocess(unsigned unroll_factor) {
                       in_loop(unroll_data[cbbid].first_original, loop_hdr))
                     continue;
 
-                  // independent from use but called much less often here
-                  // if variable not declared yet before or at some pred, skip
-                  auto orig_cbbid = lt.bb_map[*((Instr*) val)->containingBB()];
-                  for (auto pred : merge_data.preds)
-                    if (get<0>(pred) != orig_cbbid &&
-                        !is_ancestor(orig_cbbid, get<0>(pred)))
-                      goto next_duped_instr;
+                  if (!all_preds_know_val(merge, val))
+                    goto next_duped_instr;
 
                   added_phi.insert(val);
                   to_insert.emplace_back(move(create_phi(merge, val)));
