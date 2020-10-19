@@ -1135,6 +1135,8 @@ void Transform::preprocess(unsigned unroll_factor) {
     vector<unsigned> orig_loop_nodes;
     // phi insertion candidates
     unordered_set<unsigned> loop_merge_exits;
+    bool is_merge_exit;
+    unordered_set<Value*> candidate_phi_vals;
   };
 
   if (k > 0) {
@@ -1187,6 +1189,9 @@ void Transform::preprocess(unsigned unroll_factor) {
 
       // all dupes and the bb_id they were created for a given instr
       unordered_map<Value*, list<pair<unsigned, Value*>>> instr_dupes;
+
+      // duped instr -> original instr
+      unordered_map<Value*, Value*> orig_instr;
 
       // Prepare data structure for unroll algorithm
       for (auto &node : lt.node_data) {
@@ -1370,8 +1375,10 @@ void Transform::preprocess(unsigned unroll_factor) {
         auto &merge_exits = unroll_data[loop_hdr].loop_merge_exits;
         for (auto id : lt.loop_data[loop_hdr].nodes) {
           for (auto &succ : lt.node_data[id].succs)
-            if (!in_loop(get<0>(succ), loop_hdr))
+            if (!in_loop(get<0>(succ), loop_hdr)) {
               merge_exits.insert(get<0>(succ));
+              unroll_data[get<0>(succ)].is_merge_exit = true;
+            }
         }
       }
 
@@ -1529,6 +1536,10 @@ void Transform::preprocess(unsigned unroll_factor) {
               auto &dst = get<0>(s);
               if (get<2>(s) || top_order_idx[dst] > top_order_idx[bb2])
                 continue;
+              // debugging
+              if (bb1 == 10 && bb2 == 71)
+                cout << "took edge: (" << lt.node_data[bb].bb->getName()
+                      << "," << lt.node_data[dst].bb->getName() << ")\n";
               if (dst == bb2)
                 return true;
               wl.push_back(dst);
@@ -1549,8 +1560,95 @@ void Transform::preprocess(unsigned unroll_factor) {
           return false;
         };
 
-        // add phi instructions where needed
+        // Get the most recently duped value given a value and the pred
+        auto get_updated_val = [&](Value *val, unsigned pred, Value *use)
+                               -> Value* {
+          Value *updated_val = val;
+          auto &idupes = instr_dupes[val];
+          for (auto I = idupes.rbegin(), E = idupes.rend(); I != E; ++I) {
+            auto &[decl_bb, duped_val] = *I;
+            auto bb = lt.node_data[pred].bb;
+            if (is_ancestor(decl_bb, pred) &&
+                (decl_bb != pred || !use_before_decl(use, duped_val, bb))) {
+              updated_val = duped_val;
+              break;
+            }
+          }
+          return updated_val;
+        };
+
+
+        CFG unrolled_cfg(*fn);
+        DomTree dt(*fn, unrolled_cfg);
+
+        // check if val is declared for each pred of merge using dominators
+        auto all_preds_know_val = [&](unsigned merge, Value *val) {
+          auto cbb = *((Instr*) val)->containingBB();
+          for (auto pred : lt.node_data[merge].preds)
+            if (!dt.dominates(*cbb, *lt.node_data[get<0>(pred)].bb))
+              return false;
+          return true;
+        };
+
         unordered_map<Value*, Value*> phi_use;
+        // find which merges given val require another phi due to a previous
+        // phi insertion
+        auto gather_phi_candidates = [&](unsigned m, Value *val) {
+          vector<unsigned> wl = { m };
+          unordered_map<unsigned, bool> visited;
+
+          while (!wl.empty()) {
+            auto cur = wl.back();
+            wl.pop_back();
+            auto &vis = visited[cur];
+            if (vis)
+              continue;
+            vis = true;
+
+            for (auto &s : lt.node_data[cur].succs) {
+              auto dst = get<0>(s);
+              if (!get<2>(s) && top_order_idx[dst] > top_order_idx[cur])
+                wl.emplace_back(dst);
+            }
+
+            // ignore merge exits, non merges, and dupes
+            if (unroll_data[cur].is_merge_exit
+                || lt.node_data[cur].preds.size() == 1
+                || unroll_data[cur].first_original != cur)
+              continue;
+
+            // ignore merges that do not have val live in each pred
+            if (!all_preds_know_val(cur, val))
+              continue;
+
+            unordered_set<Value*> pred_values;
+            for (auto &pred : lt.node_data[cur].preds)
+              pred_values.insert(get_updated_val(val, get<0>(pred), val));
+
+            // if all pred values the same then no phi is needed
+            if (pred_values.size() != 1)
+              continue;
+
+            bool has_phi_for_val = false;
+            for (auto &i : lt.node_data[cur].bb->instrs()) {
+              // does it already have a phi for this val?
+              if (auto phi = dynamic_cast<Phi*>(const_cast<Instr*>(&i))) {
+                auto I = orig_instr.find(phi);
+                if (I != orig_instr.end() && I->second == val) {
+                  has_phi_for_val = true;
+                  break;
+                }
+              } else {
+                break;
+              }
+            }
+
+            if (!has_phi_for_val)
+              unroll_data[cur].candidate_phi_vals.insert(val);
+
+          }
+        };
+
         auto create_phi = [&](unsigned merge, Value *val)
                           -> unique_ptr<Phi> {
           auto &sfx = unroll_data[merge].suffix;
@@ -1561,20 +1659,13 @@ void Transform::preprocess(unsigned unroll_factor) {
           unroll_data[merge].dupes.emplace_front(val, &(*phi));
           phi_use[&(*phi)] = val;
           unroll_data[merge].added_phi.emplace_back(val, &(*phi));
+          orig_instr[&(*phi)] = &(*phi);
+
           return phi;
         };
 
-        // check if val is declared for each pred of merge
-        auto all_preds_know_val = [&](unsigned merge, Value *val) {
-          auto orig_cbbid = lt.bb_map[*((Instr*) val)->containingBB()];
-          for (auto pred : lt.node_data[merge].preds)
-            if (get<0>(pred) != orig_cbbid &&
-                !is_ancestor(orig_cbbid, get<0>(pred)))
-              return false;
-          return true;
-        };
-
         // add phi instructions where needed - phi instr - original value
+        vector<pair<unsigned, Value*>> to_gather;
         for (auto loop_hdr : lt.loop_header_ids) {
           for (auto merge : unroll_data[loop_hdr].loop_merge_exits) {
             auto &merge_data = lt.node_data[merge];
@@ -1606,11 +1697,7 @@ void Transform::preprocess(unsigned unroll_factor) {
 
                   added_phi.insert(val);
                   to_insert.emplace_back(move(create_phi(merge, val)));
-
-                  // if for some merge or descendant thereof uses a value equal between
-                  // all preds, and the insertion of a phi in an ancestor block makes
-                  // one of these values different then a new phi needs to be inserted
-                  // gather_phi_candidates(merge, val);
+                  to_gather.emplace_back(merge, val);
                   break;
                 }
 next_duped_instr:;
@@ -1621,22 +1708,27 @@ next_duped_instr:;
           }
         }
 
-        // Get the most recently duped value given a value and the pred
-        auto get_updated_val = [&](Value *val, unsigned pred, Value *use)
-                               -> Value* {
-          Value *updated_val = val;
-          auto &idupes = instr_dupes[val];
-          for (auto I = idupes.rbegin(), E = idupes.rend(); I != E; ++I) {
-            auto &[decl_bb, duped_val] = *I;
-            auto bb = lt.node_data[pred].bb;
-            if (is_ancestor(decl_bb, pred) &&
-                (decl_bb != pred || !use_before_decl(use, duped_val, bb))) {
-              updated_val = duped_val;
-              break;
-            }
+        // if for some merge or descendant thereof uses a value equal between
+        // all preds, and the insertion of a phi in an ancestor block makes
+        // one of these values different then a new phi needs to be inserted
+
+        // gather candidates for new phis if needed
+        for (auto [merge, val] : to_gather)
+          gather_phi_candidates(merge, val);
+
+        // add phis when a new phi demands it
+        for (auto id : bbs_top_order) {
+          if (unroll_data[id].candidate_phi_vals.empty())
+            continue;
+
+          unordered_set<Value*> pred_values;
+          auto &bb_data = lt.node_data[id];
+          for (auto val : unroll_data[id].candidate_phi_vals) {
+            bb_data.bb->addInstrFront(create_phi(id, val));
+            gather_phi_candidates(id, val);
           }
-          return updated_val;
-        };
+        }
+
 
         // dupe instrs in topological order and build phi reference
         for (auto id : bbs_top_order) {
@@ -1649,6 +1741,7 @@ next_duped_instr:;
             for (auto &i : orig_bb->instrs()) {
               if (&i != &orig_bb->back()) {
                 bb->addInstr(i.dup(suffix));
+                orig_instr[&bb->back()] = const_cast<Instr*>(&i);
                 Value *i_val = (Value*) &i;
                 // if inserted phi grab the correct value to register dupe for
                 if (auto phi = dynamic_cast<Phi*>(i_val)) {
@@ -1695,6 +1788,7 @@ next_duped_instr:;
             }
           }
         }
+
 
 
         // phi entries

@@ -294,6 +294,7 @@ class DomTree final {
   public:
     DomTree(Function &f, CFG &cfg) : f(f), cfg(cfg) { buildDominators(); }
     const BasicBlock* getIDominator(const BasicBlock &bb) const;
+    bool dominates(const BasicBlock &bb1, const BasicBlock &bb2);
     void printDot(std::ostream &os) const;
 };
 

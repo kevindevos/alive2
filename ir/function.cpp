@@ -683,13 +683,15 @@ void DomTree::buildDominators() {
   // initialization
   unsigned i = f.getBBs().size();
   for (auto &b : f.getBBs()) {
-    doms.emplace(b, *b).first->second.order = --i;
+    if (!b->empty())
+      doms.emplace(b, *b).first->second.order = --i;
   }
 
   // build predecessors relationship
   for (auto [src, tgt, instr] : cfg) {
     (void)instr;
-    doms.at(&tgt).preds.push_back(&doms.at(&src));
+    if (!tgt.empty())
+      doms.at(&tgt).preds.push_back(&doms.at(&src));
   }
 
   auto &entry = doms.at(&f.getFirstBB());
@@ -737,6 +739,20 @@ DomTree::DomTreeNode* DomTree::intersect(DomTreeNode *f1, DomTreeNode *f2) {
 const BasicBlock* DomTree::getIDominator(const BasicBlock &bb) const {
   auto dom = doms.at(&bb).dominator;
   return dom ? &dom->bb : nullptr;
+}
+
+bool DomTree::dominates(const BasicBlock &bb1, const BasicBlock &bb2) {
+  if (&bb1 == &bb2)
+    return true;
+
+  DomTreeNode *node = &doms.at(&bb2);
+  do {
+    node = node->dominator;
+    if (&node->bb == &bb1)
+      return true;
+  } while (&node->bb != &f.getFirstBB());
+
+  return false;
 }
 
 void DomTree::printDot(std::ostream &os) const {
