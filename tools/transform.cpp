@@ -1527,10 +1527,10 @@ void Transform::preprocess(unsigned unroll_factor) {
 
             for (auto &s : lt.node_data[bb].succs) {
               auto &dst = get<0>(s);
-              if (dst == bb2)
-                return true;
               if (get<2>(s) || top_order_idx[dst] > top_order_idx[bb2])
                 continue;
+              if (dst == bb2)
+                return true;
               wl.push_back(dst);
             }
           } while (!wl.empty());
