@@ -1672,13 +1672,13 @@ void Transform::preprocess(unsigned unroll_factor) {
 
                   added_phi.insert(val);
                   to_insert.emplace_back(move(create_phi(merge, val, false)));
+                  to_gather.emplace_back(merge, val);
                   break;
                 }
 next_duped_instr:;
               }
             }
             for (auto &phi : to_insert) {
-              to_gather.emplace_back(merge, &(*phi));
               merge_data.bb->addInstrFront(move(phi));
             }
           }
