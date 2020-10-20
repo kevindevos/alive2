@@ -1611,9 +1611,8 @@ void Transform::preprocess(unsigned unroll_factor) {
                 wl.emplace_back(dst);
             }
 
-            // ignore merge exits, non merges, and dupes
-            if (unroll_data[cur].is_merge_exit
-                || lt.node_data[cur].preds.size() == 1
+            // ignore non merges and dupes
+            if (lt.node_data[cur].preds.size() == 1
                 || unroll_data[cur].first_original != cur)
               continue;
 
