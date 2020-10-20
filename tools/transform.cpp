@@ -1083,34 +1083,6 @@ void Transform::preprocess(unsigned unroll_factor) {
     // TODO: check that tgt init refines that of src
   }
 
-  // remove side-effect free instructions without users
-  vector<Instr*> to_remove;
-  for (auto fn : { &src, &tgt }) {
-    bool changed;
-    do {
-      auto users = fn->getUsers();
-      changed = false;
-
-      for (auto bb : fn->getBBs()) {
-        for (auto &i : bb->instrs()) {
-          auto i_ptr = const_cast<Instr*>(&i);
-          if (hasNoSideEffects(i) && !users.count(i_ptr))
-            to_remove.emplace_back(i_ptr);
-        }
-
-        for (auto i : to_remove) {
-          bb->delInstr(i);
-          changed = true;
-        }
-        to_remove.clear();
-      }
-
-      changed |=
-        fn->removeUnusedStuff(users, fn == &src ? vector<string_view>()
-                                                : src.getGlobalVarNames());
-    } while (changed);
-  }
-
   auto k = unroll_factor;
   k = 2;
 
@@ -1648,13 +1620,17 @@ void Transform::preprocess(unsigned unroll_factor) {
           }
         };
 
-        auto create_phi = [&](unsigned merge, Value *val)
+        auto create_phi = [&](unsigned merge, Value *val, bool extra)
                           -> unique_ptr<Phi> {
           auto &sfx = unroll_data[merge].suffix;
           auto &bb_name = lt.node_data[merge].bb->getName();
-          auto phi = make_unique<Phi>(val->getType(),
-                                      val->getName() + sfx +
-                                      "_phi_" + bb_name);
+          unique_ptr<Phi> phi;
+          if (!extra)
+            phi = make_unique<Phi>(val->getType(),
+                                      val->getName() + sfx + "_phi_" + bb_name);
+          else
+            phi = make_unique<Phi>(val->getType(),
+                                      val->getName() + sfx + "_phi_" + bb_name + "_extra");
           unroll_data[merge].dupes.emplace_front(val, &(*phi));
           phi_use[&(*phi)] = val;
           unroll_data[merge].added_phi.emplace_back(val, &(*phi));
@@ -1724,11 +1700,10 @@ next_duped_instr:;
           unordered_set<Value*> pred_values;
           auto &bb_data = lt.node_data[id];
           for (auto val : unroll_data[id].candidate_phi_vals) {
-            bb_data.bb->addInstrFront(create_phi(id, val));
+            bb_data.bb->addInstrFront(create_phi(id, val, false));
             gather_phi_candidates(id, val);
           }
         }
-
 
         // dupe instrs in topological order and build phi reference
         for (auto id : bbs_top_order) {
@@ -1857,6 +1832,11 @@ next_duped_instr:;
         }
       }
 
+      for (auto &node : lt.node_data) {
+        if (node.bb->getName() == "%while.end79")
+          cout << "-" << node.id << "\n";
+      }
+
       // DEBUG , print unrolled dot for src only
       if (config::debug) {
         string name = fn == &src ? "src" : "tgt";
@@ -1865,6 +1845,34 @@ next_duped_instr:;
         cfg_.printDot(f3);
       }
     }
+  }
+
+  // remove side-effect free instructions without users
+  vector<Instr*> to_remove;
+  for (auto fn : { &src, &tgt }) {
+    bool changed;
+    do {
+      auto users = fn->getUsers();
+      changed = false;
+
+      for (auto bb : fn->getBBs()) {
+        for (auto &i : bb->instrs()) {
+          auto i_ptr = const_cast<Instr*>(&i);
+          if (hasNoSideEffects(i) && !users.count(i_ptr))
+            to_remove.emplace_back(i_ptr);
+        }
+
+        for (auto i : to_remove) {
+          bb->delInstr(i);
+          changed = true;
+        }
+        to_remove.clear();
+      }
+
+      changed |=
+        fn->removeUnusedStuff(users, fn == &src ? vector<string_view>()
+                                                : src.getGlobalVarNames());
+    } while (changed);
   }
 }
 
