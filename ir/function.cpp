@@ -398,11 +398,11 @@ void LoopTree::buildLoopTree() {
   vector<bool> visited; // bb id -> visited
 
   vecsets_data.reserve(f.getBBs().size());
+  nodes.resize(f.getBBs().size()+1);
 
   auto bb_id = [&](const BasicBlock *bb) {
     auto [I, inserted] = bb_map.emplace(bb, node_data.size());
     if (inserted) {
-      nodes.emplace_back();
       number.emplace_back();
       last.emplace_back();
       node_data.emplace_back();
