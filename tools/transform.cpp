@@ -1826,6 +1826,44 @@ next_duped_instr:;
             }
           }
         }
+
+        // remove phi instructions with no uses in reverse topological order
+        users = fn->getUsers();
+        vector<Instr*> phis;
+        for (auto I = bbs_top_order.rbegin(), E = bbs_top_order.rend(); I != E;
+             ++I) {
+          auto bb = lt.node_data[*I].bb;
+          // gather phis for reverse iteration
+          for (auto &i : bb->instrs()) {
+            auto i_ptr = const_cast<Instr*>(&i);
+            if (dynamic_cast<Phi*>(i_ptr))
+              phis.emplace_back(i_ptr);
+            else
+              break;
+          }
+          // if phi has no uses, remove it and remove uses for each of its ops
+          for (auto II = phis.rbegin(), EE = phis.rend(); II != EE; ++II) {
+            auto i_ptr = *II;
+            if (!users.count(i_ptr)) {
+              // remove values in each phi entry from users
+              if (auto phi = dynamic_cast<Phi*>(i_ptr)) {
+                for (auto val : phi->getValues()) {
+                  auto uses = users.equal_range(val.first);
+                  for (auto III = uses.first, EEE = uses.second; III != EEE;
+                       ++III) {
+                    auto use = *III;
+                    if (use.second == i_ptr)
+                      users.erase(III);
+                    break;
+                  }
+                }
+              }
+              // remove phi
+              bb->delInstr(i_ptr);
+            }
+          }
+          phis.clear();
+        }
       }
 
       // DEBUG , print unrolled dot for src only
