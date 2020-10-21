@@ -1162,9 +1162,6 @@ void Transform::preprocess(unsigned unroll_factor) {
       // all dupes and the bb_id they were created for a given instr
       unordered_map<Value*, list<pair<unsigned, Value*>>> instr_dupes;
 
-      // duped instr -> original instr
-      unordered_map<Value*, Value*> orig_instr;
-
       // Prepare data structure for unroll algorithm
       for (auto &node : lt.node_data) {
         unroll_data.emplace_back();
@@ -1626,7 +1623,6 @@ void Transform::preprocess(unsigned unroll_factor) {
           unroll_data[merge].dupes.emplace_front(val, &(*phi));
           phi_use[&(*phi)] = val;
           unroll_data[merge].added_phi.emplace_back(val, &(*phi));
-          orig_instr[&(*phi)] = &(*phi);
 
           return phi;
         };
@@ -1708,7 +1704,6 @@ next_duped_instr:;
             for (auto &i : orig_bb->instrs()) {
               if (&i != &orig_bb->back()) {
                 bb->addInstr(i.dup(suffix));
-                orig_instr[&bb->back()] = const_cast<Instr*>(&i);
                 Value *i_val = (Value*) &i;
                 // if inserted phi grab the correct value to register dupe for
                 if (auto phi = dynamic_cast<Phi*>(i_val)) {
