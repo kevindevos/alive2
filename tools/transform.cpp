@@ -1508,10 +1508,6 @@ void Transform::preprocess(unsigned unroll_factor) {
               auto &dst = get<0>(s);
               if (get<2>(s) || top_order_idx[dst] > top_order_idx[bb2])
                 continue;
-              // debugging
-              if (bb1 == 10 && bb2 == 71)
-                cout << "took edge: (" << lt.node_data[bb].bb->getName()
-                      << "," << lt.node_data[dst].bb->getName() << ")\n";
               if (dst == bb2)
                 return true;
               wl.push_back(dst);
@@ -1830,11 +1826,6 @@ next_duped_instr:;
             }
           }
         }
-      }
-
-      for (auto &node : lt.node_data) {
-        if (node.bb->getName() == "%while.end79")
-          cout << "-" << node.id << "\n";
       }
 
       // DEBUG , print unrolled dot for src only
