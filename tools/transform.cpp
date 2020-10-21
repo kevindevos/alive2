@@ -1600,8 +1600,8 @@ void Transform::preprocess(unsigned unroll_factor) {
             for (auto &i : lt.node_data[cur].bb->instrs()) {
               // does it already have a phi for this val?
               if (auto phi = dynamic_cast<Phi*>(const_cast<Instr*>(&i))) {
-                auto I = orig_instr.find(phi);
-                if (I != orig_instr.end() && I->second == val) {
+                auto I = phi_use.find(phi);
+                if (I != phi_use.end() && I->second == val) {
                   has_phi_for_val = true;
                   break;
                 }
