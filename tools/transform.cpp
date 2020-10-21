@@ -1277,7 +1277,8 @@ void Transform::preprocess(unsigned unroll_factor) {
 
           dst_data.preds.emplace_back(src, cond, false, is_default);
           for (auto &[succ, val, back_edge, def] : src_data.succs) {
-            (void)def;
+            if (def && !is_default)
+              continue;
             if (val == cond) {
               pred_to_erase = make_pair(succ, src);
               succ = dst;
