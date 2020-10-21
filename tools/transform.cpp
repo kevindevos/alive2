@@ -1616,17 +1616,13 @@ void Transform::preprocess(unsigned unroll_factor) {
           }
         };
 
-        auto create_phi = [&](unsigned merge, Value *val, bool extra)
+        auto create_phi = [&](unsigned merge, Value *val)
                           -> unique_ptr<Phi> {
           auto &sfx = unroll_data[merge].suffix;
           auto &bb_name = lt.node_data[merge].bb->getName();
           unique_ptr<Phi> phi;
-          if (!extra)
-            phi = make_unique<Phi>(val->getType(),
-                                      val->getName() + sfx + "_phi_" + bb_name);
-          else
-            phi = make_unique<Phi>(val->getType(),
-                                      val->getName() + sfx + "_phi_" + bb_name + "_extra");
+          phi = make_unique<Phi>(val->getType(),
+                                    val->getName() + sfx + "_phi_" + bb_name);
           unroll_data[merge].dupes.emplace_front(val, &(*phi));
           phi_use[&(*phi)] = val;
           unroll_data[merge].added_phi.emplace_back(val, &(*phi));
@@ -1667,7 +1663,7 @@ void Transform::preprocess(unsigned unroll_factor) {
                     goto next_duped_instr;
 
                   added_phi.insert(val);
-                  to_insert.emplace_back(move(create_phi(merge, val, false)));
+                  to_insert.emplace_back(move(create_phi(merge, val)));
                   to_gather.emplace_back(merge, val);
                   break;
                 }
@@ -1696,7 +1692,7 @@ next_duped_instr:;
           unordered_set<Value*> pred_values;
           auto &bb_data = lt.node_data[id];
           for (auto val : unroll_data[id].candidate_phi_vals) {
-            bb_data.bb->addInstrFront(create_phi(id, val, false));
+            bb_data.bb->addInstrFront(create_phi(id, val));
             gather_phi_candidates(id, val);
           }
         }
