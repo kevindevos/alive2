@@ -397,21 +397,59 @@ void LoopTree::vecsetUnion(unsigned from, unsigned to) {
 void LoopTree::buildLoopTree() {
   vector<bool> visited; // bb id -> visited
 
-  vecsets_data.reserve(f.getBBs().size());
-  nodes.resize(f.getBBs().size()+1);
+  auto sz = f.getBBs().size()+1;
+  nodes.resize(sz);
+  number.resize(sz);
+  last.resize(sz);
+  node_data.resize(sz);
+  vecsets.resize(sz);
+  vecsets_data.resize(sz);
+  visited.resize(sz);
 
-  auto bb_id = [&](const BasicBlock *bb) {
-    auto [I, inserted] = bb_map.emplace(bb, node_data.size());
-    if (inserted) {
-      number.emplace_back();
-      last.emplace_back();
-      node_data.emplace_back();
-      vecsets.emplace_back();
-      vecsets_data.emplace_back();
-      visited.emplace_back();
+  // generate bb ids
+  unsigned i = 0;
+  for (auto bb : f.getBBs()) {
+    node_data[i].bb = bb;
+    bb_map.emplace(bb, i++);
+  }
+
+  // topsort before DFS
+  vector<unsigned> sorted;
+  vector<unsigned> marked;
+  vector<unsigned> pushed;
+  vector<unsigned> top_order_idx;
+  vector<const BasicBlock*> wl;
+  marked.resize(sz);
+  pushed.resize(sz);
+  top_order_idx.resize(sz);
+
+  wl.emplace_back(&f.getFirstBB());
+  while (!wl.empty()) {
+    auto cur = wl.back();
+    auto cur_id = bb_map[cur];
+    wl.pop_back();
+    auto &vis = marked[cur_id];
+
+    if (!vis) {
+      vis = true;
+      wl.emplace_back(cur);
+      if (auto instr = dynamic_cast<const JumpInstr*>(&cur->back())) {
+        auto tgt_it = const_cast<JumpInstr*>(instr)->targets();
+        for (auto I = tgt_it.begin(), E = tgt_it.end(); I != E; ++I)
+          wl.emplace_back(&(*I));
+      }
+    } else {
+      if (!pushed[cur_id]) {
+        sorted.emplace_back(cur_id);
+        pushed[cur_id] = true;
+      }
     }
-    return I->second;
-  };
+  }
+
+  // build top_order_idx
+  for (unsigned i = sorted.size()-1, j = 0; i != -1u; --i, ++j)
+    top_order_idx[sorted[i]] = j;
+
 
   // check if bb with preorder w is an ancestor of bb with preorder v
   auto isAncestor = [&](unsigned w, unsigned v) {
@@ -428,7 +466,7 @@ void LoopTree::buildLoopTree() {
 
     auto try_push_worklist = [&](const BasicBlock *bb, unsigned pred, auto c,
                                  bool is_default) {
-      auto t_n = bb_id(bb);
+      auto t_n = bb_map[bb];
       bool b_visited = visited[t_n];
       if (!b_visited)
         dfs_work_list.push(bb);
@@ -443,7 +481,7 @@ void LoopTree::buildLoopTree() {
     while (!dfs_work_list.empty()) {
       auto cur_bb = dfs_work_list.top();
       dfs_work_list.pop();
-      int n = bb_id(cur_bb);
+      int n = bb_map[cur_bb];
       nodes[current] = n;
       auto &cur_node_data = node_data[n];
       cur_node_data.bb = const_cast<BasicBlock*>(cur_bb);
@@ -455,17 +493,51 @@ void LoopTree::buildLoopTree() {
         vecsets[n] = &vecsets_data[n];
         dfs_work_list.push(cur_bb);
 
-        // add sucessors to work_list if not visited
+        // add sucessors to work_list if not visited in reverse topological ordr
+        // to avoid classifying forward edges as backedges
+        // <dst_id, dst bb, pred_id, cond, is_default, added>
+        vector<tuple<unsigned, BasicBlock*, unsigned, Value*, bool, bool>> tgts;
+        vector<unsigned> sorted_tgts; // tgts idx
+
         if (auto instr = dynamic_cast<const JumpInstr*>(&cur_bb->back())) {
           auto tgt_it = const_cast<JumpInstr*>(instr)->targets();
           auto first_it = true;
           for (auto I = tgt_it.begin(), E = tgt_it.end(); I != E; ++I) {
             auto [cond, bb] = I.get();
             bool is_default = dynamic_cast<const Switch*>(instr) && first_it;
-            try_push_worklist(bb, n, cond, is_default);
+            tgts.emplace_back(bb_map[bb], bb, n, cond, is_default, false);
             first_it = false;
           }
+          // sort targets with descending topological order // TODO inefficient
+          auto tgts_sz = tgts.size();
+          optional<unsigned> max_top_order;
+          optional<unsigned> max_tgts_idx;
+          for (unsigned i = 0; i < tgts_sz; ++i) {
+            for (unsigned j = 0; j < tgts_sz; ++j) {
+              auto added = get<5>(tgts[j]);
+              if (added)
+                continue;
+              auto j_top_order = top_order_idx[get<0>(tgts[j])];
+              if (!max_top_order || j_top_order > *max_top_order) {
+                max_top_order = j_top_order;
+                max_tgts_idx = j;
+              }
+            }
+            sorted_tgts.emplace_back(*max_tgts_idx);
+            get<5>(tgts[*max_tgts_idx]) = true;
+            max_top_order.reset();
+            max_tgts_idx.reset();
+          }
+          // add to worklist in descending topological order
+          // last is picked first
+          for (auto idx : sorted_tgts) {
+            auto &e = tgts[idx];
+            try_push_worklist(get<1>(e), get<2>(e), get<3>(e), get<4>(e));
+          }
+
         }
+        tgts.clear();
+        sorted_tgts.clear();
       } else {
         last[number[n]] = current - 1;
       }
