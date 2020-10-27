@@ -397,8 +397,8 @@ void LoopTree::vecsetUnion(unsigned from, unsigned to) {
 void LoopTree::buildLoopTree() {
   vector<bool> visited; // bb id -> visited
 
-  auto sz = f.getBBs().size()+1;
-  nodes.resize(sz);
+  auto sz = f.getBBs().size();
+  nodes.resize(sz+1);
   number.resize(sz);
   last.resize(sz);
   node_data.resize(sz);

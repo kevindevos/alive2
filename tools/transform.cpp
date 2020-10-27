@@ -1550,7 +1550,7 @@ void Transform::preprocess(unsigned unroll_factor) {
         // check if val is declared for each pred of merge using dominators
         auto all_preds_know_val = [&](unsigned merge, Value *val) {
           auto cbb = *((Instr*) val)->containingBB();
-          for (auto pred : lt.node_data[merge].preds)
+          for (auto &pred : lt.node_data[merge].preds)
             if (!dt.dominates(*cbb, *lt.node_data[get<0>(pred)].bb))
               return false;
           return true;
